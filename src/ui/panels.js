@@ -287,12 +287,13 @@ definePanel('menu', {
   render() {
     const st = G.save.settings, run = G.zone && G.zone.run;
     return `<div class="col grow"><button class="big" data-a="close">Продолжить</button>${run ? '<button data-a="hub">Вернуться в город (покинуть вылазку)</button>' : ''}
-    <button data-a="chars">Сменить персонажа</button><button data-a="dps">Счётчик урона: ${st.dps ? 'вкл.' : 'выкл.'}</button>
+    <button data-a="chars">Сменить персонажа</button><button data-a="dps">Счётчик урона: ${st.dps ? 'вкл.' : 'выкл.'}</button><button data-a="gfx">Графика: ${st.gfx === '2d' ? '2D (лёгкая)' : '3D · ' + (G.gfx || '')} — сменить</button>
     <h3>Сохранение</h3><div class="row"><button data-a="exp">Экспорт в буфер</button><button data-a="imp">Импорт</button></div><div class="dim small">Игра сохраняется автоматически в этом браузере. Колесо мыши — масштаб.</div></div>`;
   },
   act(d) {
     if (d.a === 'hub') { closePanel(); leaveRun(); return false; }
     if (d.a === 'chars') { saveNow(); closePanel(); showTitle(); return false; }
+    if (d.a === 'gfx') { G.save.settings.gfx = G.save.settings.gfx === '2d' ? '3d' : '2d'; saveNow(); location.reload(); return false; }
     if (d.a === 'dps') { G.save.settings.dps = !G.save.settings.dps; saveNow(); }
     if (d.a === 'exp') { const s = exportSave(); (navigator.clipboard ? navigator.clipboard.writeText(s) : Promise.reject()).then(() => toast('Сохранение скопировано в буфер обмена'), () => prompt('Скопируйте строку сохранения:', s)); return false; }
     if (d.a === 'imp') { const s = prompt('Вставьте строку сохранения:'); if (s) { if (importSave(s)) { closePanel(); showTitle(); toast('Сохранение загружено'); } else toast('Строка повреждена', '#f88'); } return false; }

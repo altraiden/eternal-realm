@@ -47,12 +47,12 @@ function tilesFor(id) {
 
 export function initRender(cv) {
   R.cv = cv; R.ctx = cv.getContext('2d'); R.lcv = document.createElement('canvas'); R.lctx = R.lcv.getContext('2d');
-  const fit = () => { R.W = cv.width = window.innerWidth; R.H = cv.height = window.innerHeight; R.lcv.width = Math.ceil(R.W / 3); R.lcv.height = Math.ceil(R.H / 3); };
+  const fit = () => { R.W = cv.width = window.innerWidth; R.H = cv.height = window.innerHeight; if (R.onResize) R.onResize(); R.lcv.width = Math.ceil(R.W / 3); R.lcv.height = Math.ceil(R.H / 3); };
   window.addEventListener('resize', fit); fit();
 }
 export const zoomNow = () => Math.max(0.6, Math.min(1.8, (R.H / 900) * (G.save ? G.save.settings.zoom : 1) * 1.15));
-export function w2s(x, y) { const z = zoomNow(), c = G.cam; return [((x - y) - (c.x - c.y)) * HW * z + R.W / 2, ((x + y) - (c.x + c.y)) * HH * z + R.H / 2]; }
-export function s2w(sx, sy) { const z = zoomNow(), c = G.cam; const ix = (sx - R.W / 2) / (HW * z) + (c.x - c.y), iy = (sy - R.H / 2) / (HH * z) + (c.x + c.y); return [(ix + iy) / 2, (iy - ix) / 2]; }
+export function w2s(x, y) { if (R.proj) return R.proj.w2s(x, y); const z = zoomNow(), c = G.cam; return [((x - y) - (c.x - c.y)) * HW * z + R.W / 2, ((x + y) - (c.x + c.y)) * HH * z + R.H / 2]; }
+export function s2w(sx, sy) { if (R.proj) return R.proj.s2w(sx, sy); const z = zoomNow(), c = G.cam; const ix = (sx - R.W / 2) / (HW * z) + (c.x - c.y), iy = (sy - R.H / 2) / (HH * z) + (c.x + c.y); return [(ix + iy) / 2, (iy - ix) / 2]; }
 const iso = (x, y) => [(x - y) * HW, (x + y) * HH];
 
 function ellipse(ctx, x, y, rad, inner) {
@@ -90,6 +90,7 @@ function drawActor(ctx, a, t) {
 }
 
 export function render(dt) {
+  if (R.r3) return R.r3(dt);
   const ctx = R.ctx, z = G.zone, W = R.W, H = R.H, t = G.time;
   ctx.imageSmoothingEnabled = false;
   if (!z) { ctx.fillStyle = '#07060a'; ctx.fillRect(0, 0, W, H); return; }
@@ -217,7 +218,12 @@ export function render(dt) {
   if (p) { const [sx, sy] = w2s(p.x, p.y), g = ctx.createRadialGradient(sx, sy - 24, 0, sx, sy - 24, 230 * zm); g.addColorStop(0, 'rgba(255,196,130,0.10)'); g.addColorStop(1, 'rgba(255,196,130,0)'); ctx.fillStyle = g; ctx.fillRect(sx - 240 * zm, sy - 270 * zm, 480 * zm, 480 * zm); }
   ctx.globalCompositeOperation = 'source-over';
   post(ctx, z, b, t, dt, W, H);
-  // ---- overlays in screen space
+  post(ctx, z, b, t, dt, W, H);
+  drawOverlay(ctx, z, W, H, t, zm, p);
+}
+
+// Names, health bars, loot labels, floating numbers — shared by the 2D and 3D renderers.
+export function drawOverlay(ctx, z, W, H, t, zm, p) {
   ctx.textAlign = 'center'; ctx.lineJoin = 'round';
   for (const a of z.actors) {
     if (a.dead) continue;
@@ -272,7 +278,7 @@ const P_CFG = {
   abyss: { n: 75, col: '#b98bff', glow: 1, vy: -9, vx: 0, size: [1, 3], wob: 1 }, grave: { n: 55, col: '#9fd8c8', glow: 1, vy: -5, vx: 2, size: [1, 2], wob: 1 },
   cave: { n: 45, col: '#d8c8a0', vy: 7, vx: 2, size: [1, 2] }, hub: { n: 55, col: '#ffcf8a', glow: 1, vy: -11, vx: 5, size: [1, 2], wob: 1 },
 };
-function vignette(W, H) {
+export function vignette(W, H) {
   if (R.vig && R.vig.width === W && R.vig.height === H) return R.vig;
   const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
   const g = x.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.hypot(W, H) * 0.6);
@@ -304,6 +310,9 @@ function post(ctx, z, b, t, dt, W, H) {
   // colour grade + vignette
   ctx.fillStyle = b.accent + '0b'; ctx.fillRect(0, 0, W, H);
   ctx.drawImage(vignette(W, H), 0, 0);
+  dangerOverlay(ctx, t, dt, W, H);
+}
+export function dangerOverlay(ctx, t, dt, W, H) {
   // danger feedback: hit flash and low-health pulse
   const p = G.p; let red = G.hurtFlash || 0; if (G.hurtFlash > 0) G.hurtFlash = Math.max(0, G.hurtFlash - dt * 2.2);
   if (p && !p.dead && p.s && p.hp < p.s.maxLife * 0.3) red = Math.max(red, 0.35 + 0.2 * Math.sin(t * 6));

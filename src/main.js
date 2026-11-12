@@ -19,6 +19,10 @@ async function boot() {
   bots.initWorld();
   initUICore();
   initGame(document.getElementById('game'));
+  if (G.save.settings.gfx !== '2d') {
+    try { const { init3D } = await import('./render3d.js'); G.gfx = await init3D(document.getElementById('game')); }
+    catch (e) { console.warn('3D renderer unavailable, using 2D', e); G.gfx = '2D'; }
+  } else G.gfx = '2D';
   bus.on('flask', useFlask);
   window.addEventListener('beforeunload', saveNow);
   showTitle();
