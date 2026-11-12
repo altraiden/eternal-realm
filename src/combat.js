@@ -87,7 +87,7 @@ export function heal(a, v) { if (a.dead || v <= 0) return; a.hp = Math.min(a.s.m
 
 export function applyHit(src, tgt, hit, o = {}) {
   if (!tgt || tgt.dead || tgt.inv > 0 || tgt.team === 2) return 0;
-  const ts = tgt.s, isP = tgt.kind === 'player', srcP = src && (src.kind === 'player' || src.kind === 'minion');
+  const ts = tgt.s, isP = !!tgt.hero, srcP = src && (src.hero || src.kind === 'minion');
   const owner = src && src.kind === 'minion' ? src.owner : src;
   if (isP && tgt.iframe > 0) { text(tgt.x, tgt.y, 'мимо', '#9cf', 12); return 0; }
   if (!hit.dot && ts.evasionF > 0 && Math.random() < Math.min(0.75, ts.evasionF / (ts.evasionF + 1200 * ((src && src.pow) || 1)))) {
@@ -125,32 +125,34 @@ export function applyHit(src, tgt, hit, o = {}) {
   }
   if (srcP && owner.s && owner.s.execute && !tgt.boss && !tgt.elite && (tgt.hp - total) / ts.maxLife * 100 < owner.s.execute) total = Math.max(total, tgt.hp);
   tgt.hp -= total; tgt.flash = 0.12; tgt.lastHurt = G.time;
-  if (tgt.kind === 'mob') { tgt.aggro = true; if (owner && owner.kind === 'player') tgt.tag = true; }
+  if (!hit.dot && owner === G.p && tgt.kind === 'mob') { fx('spark', tgt.x, tgt.y, { col: hit.crit ? '#ffd24a' : '#ffffff', dur: 0.18 }); if (hit.crit) G.cam.shake = Math.min(6, G.cam.shake + 1.6); }
+  if (tgt.kind === 'mob') { tgt.aggro = true; if (owner && owner.hero) { tgt.tag = true; const who = src.kind === 'minion' ? src : owner, th = (tgt.threat ||= {}); th[who.id] = (th[who.id] || 0) + total * (who.threatMul || 1); } }
   // feedback
-  if (isP) { text(tgt.x, tgt.y, '-' + Math.round(total), blocked ? '#aaa' : '#ff5a5a', blocked ? 12 : 15); G.cam.shake = Math.min(8, G.cam.shake + total / ts.maxLife * 30); }
-  else if (!hit.dot || Math.random() < 0.3) {
+  if (isP) { if (tgt === G.p) { text(tgt.x, tgt.y, '-' + Math.round(total), blocked ? '#aaa' : '#ff5a5a', blocked ? 12 : 15); G.cam.shake = Math.min(8, G.cam.shake + total / ts.maxLife * 30); G.hurtFlash = Math.min(1, (G.hurtFlash || 0) + total / ts.maxLife * 2.5); } }
+  else if ((!hit.dot || Math.random() < 0.3) && (owner === G.p || Math.random() < 0.2)) {
     const col = hit.crit ? '#ffd24a' : DTC[Object.keys(hit.dmg)[0]] || '#fff';
     text(tgt.x, tgt.y - 0.3, Math.round(total) + (hit.crit ? '!' : ''), col, hit.crit ? 20 : 14, hit.crit);
   }
-  if (owner && owner.kind === 'player') {
-    G.dps.win.push([G.time, total]);
+  if (owner && owner.hero) {
+    if (owner === G.p) G.dps.win.push([G.time, total]);
+    owner.dmgDone = (owner.dmgDone || 0) + total;
     if (!hit.dot) {
       if (hit.leech) heal(owner, total * hit.leech / 100);
       if (owner.s.lifeOnHit && !hit.proc) heal(owner, owner.s.lifeOnHit);
     }
-  } else if (src && src.kind === 'mob' && src.leech) heal(src, src.s.maxLife * 0.03);
+  } else if (src && src.kind === 'mob' && src.leech) heal(src, src.s.maxLife * (src.boss ? 0.0025 : 0.03));
   if (isP && src && src.kind === 'mob' && !hit.dot) {
     if (ts.thorns && dist2(src.x, src.y, tgt.x, tgt.y) < 3.5) applyHit(tgt, src, { dmg: { phys: ts.thorns * (1 + (ts.phys_inc || 0) / 100) }, crit: false, tags: ['thorns'], ail: {}, leech: 0, proc: true });
     if (blocked) { text(tgt.x, tgt.y - 0.6, 'блок', '#ddd', 12); if (tgt.mech && tgt.mech.id === 'faith') heal(tgt, ts.maxLife * 0.04); fireProcs(tgt, 'block', { tgt: src, total }); }
     fireProcs(tgt, 'hurt', { tgt: src, total });
   }
-  if (srcP && G.zone.run && G.zone.run.fx.reflect && tgt.kind === 'mob' && !hit.dot && !hit.proc && owner.kind === 'player') {
+  if (srcP && G.zone.run && G.zone.run.fx.reflect && tgt.kind === 'mob' && !hit.dot && !hit.proc && owner.hero) {
     owner.hp -= total * G.zone.run.fx.reflect / 100 * 0.2; if (owner.hp <= 0) owner.hp = 1;
   }
   // ailments
   if (!blocked && !hit.dot && tgt.hp > 0) applyAilments(src, tgt, hit, total, fireD);
   if (hit.pull && owner && !tgt.boss && tgt.hp > 0) { const a = Math.atan2(tgt.y - owner.y, tgt.x - owner.x); tgt.x = owner.x + Math.cos(a) * 1.3; tgt.y = owner.y + Math.sin(a) * 1.3; }
-  if (owner && owner.kind === 'player' && src === owner && !hit.proc && !hit.dot) {
+  if (owner && owner.hero && src === owner && !hit.proc && !hit.dot) {
     if (owner.mech && owner.mech.id === 'rage') { owner.mech.v = Math.min(40, owner.mech.v + 1); owner.mech.t = 4; }
     fireProcs(owner, 'hit', { tgt, total, hit });
     if (hit.crit) fireProcs(owner, 'crit', { tgt, total, hit });
@@ -160,8 +162,8 @@ export function applyHit(src, tgt, hit, o = {}) {
 }
 
 const hasAilment = (a) => a.st.ignite || a.st.chill || a.st.freeze || a.st.shock || a.st.poison || a.st.bleed || a.st.stun || a.st.weak || a.st.mark || a.st.rot;
-function dotScale(src) { const o = src && src.kind === 'minion' ? src.owner : src; return o && o.kind === 'player' ? (1 + (o.s.dot_inc || 0) / 100) * (o.s.dot_more ?? 1) : 1; }
-function ccScale(src, tgt) { const o = src && src.kind === 'minion' ? src.owner : src; return (o && o.kind === 'player' ? 1 + (o.s.cc_inc || 0) / 100 : 1) * (tgt.elite ? 0.5 : 1); }
+function dotScale(src) { const o = src && src.kind === 'minion' ? src.owner : src; return o && o.hero ? (1 + (o.s.dot_inc || 0) / 100) * (o.s.dot_more ?? 1) : 1; }
+function ccScale(src, tgt) { const o = src && src.kind === 'minion' ? src.owner : src; return (o && o.hero ? 1 + (o.s.cc_inc || 0) / 100 : 1) * (tgt.elite ? 0.5 : 1); }
 
 function applyAilments(src, tgt, hit, total, fireD) {
   const a = hit.ail; if (!a) return;
@@ -227,12 +229,15 @@ export function fireProcs(p, ev, ctx) {
 // ---- death
 export function kill(tgt, killer, total, hit) {
   if (tgt.dead) return;
-  if (tgt.kind === 'player') {
+  if (tgt.hero) {
     if (tgt.mech && tgt.mech.id === 'souls' && (tgt.mech.cheat || 0) <= G.time) { tgt.mech.cheat = G.time + 90; tgt.hp = tgt.s.maxLife * 0.3; tgt.iframe = 1.5; text(tgt.x, tgt.y - 1, 'Обман смерти!', '#b06bff', 18); return; }
-    tgt.dead = true; tgt.hp = 0; bus.emit('playerDeath'); return;
+    tgt.dead = true; tgt.hp = 0; tgt.act = null; tgt.dash = null; tgt.st = {};
+    if (tgt !== G.p) fx('death', tgt.x, tgt.y, { spr: tgt.spr, sv: 0, sc: tgt.sc, dur: 0.5 });
+    bus.emit(tgt === G.p ? 'playerDeath' : 'allyDeath', tgt); return;
   }
   tgt.dead = true; tgt.hp = 0;
   fx('death', tgt.x, tgt.y, { spr: tgt.spr, sv: tgt.sv, sc: tgt.sc, dur: 0.35 });
+  if (tgt.kind === 'mob') { fx('poof', tgt.x, tgt.y, { col: DTC[tgt.dt] || '#a33', dur: 0.35 }); fx('decal', tgt.x, tgt.y, { dur: 9, rad: 0.5 + (tgt.sc || 3) * 0.12, col: tgt.dt === 'poison' ? '#0c1a06' : tgt.dt === 'cold' ? '#0a1420' : '#1c0606' }); }
   if (tgt.kind === 'mob') {
     const p = G.p;
     if (p && !p.dead) {
@@ -301,6 +306,7 @@ export function updateAreas(dt) {
   for (const ar of z.areas) {
     if (ar.done) continue;
     if (ar.src && ar.src.dead && ar.src.kind === 'mob' && ar.state === 0 && !ar.keep) { ar.done = true; continue; }
+    if (ar.follow && ar.state === 0 && !ar.follow.dead) { ar.x = ar.follow.x; ar.y = ar.follow.y; }
     if (ar.state === 0) { ar.t += dt; if (ar.t >= ar.delay) trigger(ar); continue; }
     ar.life -= dt; ar.acc += dt;
     if (ar.acc >= ar.zone.every) {

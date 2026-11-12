@@ -29,6 +29,47 @@ function freeSpot(map, x, y, rad = 1.5) {
   return [x, y];
 }
 
+// ---------------------------------------------------------------- threat
+// Monsters attack whoever has the most threat; with no threat yet, the nearest hero or minion.
+export function pickTarget(m) {
+  const z = G.zone, th = m.threat, k = m.s.maxLife * 0.004; let best = null, bv = -1e18;
+  for (const h of z.heroes) { if (h.dead) continue; const d = dist2(m.x, m.y, h.x, h.y); if (d > 40) continue; const v = ((th && th[h.id]) || 0) - d * k; if (v > bv) { bv = v; best = h; } }
+  for (const mn of z.minions) { if (mn.dead) continue; const d = dist2(m.x, m.y, mn.x, mn.y); if (d > 8) continue; const v = ((th && th[mn.id]) || 0) + m.s.maxLife * (mn.taunt ? 0.35 : 0.02) - d * k; if (v > bv) { bv = v; best = mn; } }
+  return best;
+}
+const rndHero = (p) => { const hs = G.zone.heroes.filter((h) => !h.dead); return hs.length && Math.random() < 0.6 ? pick(hs) : p; };
+bus.on('taunt', (who, rad) => {
+  for (const m of G.zone.actors) { if (m.dead || m.kind !== 'mob' || dist2(m.x, m.y, who.x, who.y) > rad) continue; const th = (m.threat ||= {}); let top = 0; for (const k in th) top = Math.max(top, th[k]); th[who.id] = top * 1.3 + m.s.maxLife * 0.25; m.aggro = true; }
+});
+bus.on('healed', (who, total) => {
+  if (total <= 0) return; const ms = G.zone.actors.filter((m) => m.kind === 'mob' && !m.dead && m.aggro && dist2(m.x, m.y, who.x, who.y) < 20); if (!ms.length) return;
+  for (const m of ms) { const th = (m.threat ||= {}); th[who.id] = (th[who.id] || 0) + (total * 0.4) / ms.length; }
+});
+// Group-only boss mechanics layered on top of the boss script: spread, soak, tank buster.
+function groupMech(b, dt) {
+  const z = G.zone;
+  b.gT = (b.gT ?? rnd(7, 10)) - dt; if (b.gT > 0) return; b.gT = rnd(11, 15) / b.rate;
+  const hs = z.heroes.filter((h) => !h.dead); if (hs.length < 2) return;
+  const kind = pick(['spread', 'soak', 'buster']);
+  if (kind === 'spread') {
+    text(b.x, b.y - 2.6, 'Разбегайтесь!', '#ff9a5a', 18);
+    for (const h of shuffle(hs.slice()).slice(0, Math.min(5, Math.ceil(hs.length / 2)))) addArea({ x: h.x, y: h.y, rad: 2.3, delay: 3.2, src: b, vs: 0, follow: h, spread: 1, mk: bossHit(b, 1.3), col: '#ff9a5a' });
+  } else if (kind === 'soak') {
+    const h = pick(hs), need = Math.max(2, Math.ceil(hs.length * 0.4));
+    text(b.x, b.y - 2.6, 'Все в круг!', '#ffe45e', 18);
+    addArea({ x: h.x, y: h.y, rad: 3, delay: 4.5, src: b, vs: 0, soak: need, col: '#ffe45e', onTrigger: (ar) => {
+      fx('ring', ar.x, ar.y, { rad: ar.rad, col: '#ffe45e' });
+      const ins = z.heroes.filter((x) => !x.dead && dist2(x.x, x.y, ar.x, ar.y) <= ar.rad + x.r);
+      if (ins.length >= need) for (const x of ins) applyHit(b, x, bossHit(b, 4.5 / ins.length)());
+      else { text(ar.x, ar.y - 1, 'Удар не разделили!', '#ff5a5a', 18); G.cam.shake = 12; for (const x of z.heroes) if (!x.dead) applyHit(b, x, bossHit(b, 2.6)()); }
+    } });
+  } else {
+    const t = pickTarget(b); if (!t || !t.hero) return;
+    text(b.x, b.y - 2.6, 'Сокрушающий удар!', '#ff4d4d', 18);
+    addArea({ x: t.x, y: t.y, rad: 1.5, delay: 1.9, src: b, vs: 0, follow: t, buster: t, col: '#ff3030', onTrigger: (ar) => { fx('ring', ar.x, ar.y, { rad: 2, col: '#ff3030' }); if (!t.dead) applyHit(b, t, bossHit(b, 3.4)()); } });
+  }
+}
+
 // ---------------------------------------------------------------- monsters
 export function spawnMob(id, x, y, run, o = {}) {
   const def = MONSTERS[id], t = run.tier, fxr = run.fx, z = G.zone;
@@ -78,7 +119,7 @@ export function spawnPack(pos, run, o = {}) {
 
 function aggroPack(m) { for (const a of G.zone.actors) if (a.kind === 'mob' && !a.dead && (a.pack === m.pack && m.pack || dist2(a.x, a.y, m.x, m.y) < 4)) a.aggro = true; }
 
-function approach(m, tg, speed, dt, map, isPlayer) {
+export function approach(m, tg, speed, dt, map, isPlayer) {
   const d = dist2(m.x, m.y, tg.x, tg.y);
   let dx = (tg.x - m.x) / (d || 1), dy = (tg.y - m.y) / (d || 1);
   if (isPlayer && !m.fly && !los(map, m.x, m.y, tg.x, tg.y)) {
@@ -107,8 +148,7 @@ export function updateMob(m, dt) {
   if (m.regen) heal(m, m.s.maxLife * m.regen / 100 * dt);
   if (m.st.freeze || m.st.stun) return;
   if (m.dashTo) { const d = m.dashTo; d.t += dt; const k = Math.min(1, d.t / 0.18); m.x = d.x0 + (d.x - d.x0) * k; m.y = d.y0 + (d.y - d.y0) * k; if (k >= 1) m.dashTo = null; return; }
-  let tg = p && !p.dead ? p : null, td = tg ? dist2(m.x, m.y, tg.x, tg.y) : 99, isP = true;
-  for (const mn of z.minions) { if (mn.dead) continue; const d = dist2(m.x, m.y, mn.x, mn.y) - (mn.taunt ? 3 : 0); if (d < td && d < 8) { tg = mn; td = Math.max(0.1, dist2(m.x, m.y, mn.x, mn.y)); isP = false; } }
+  const tg = pickTarget(m), td = tg ? Math.max(0.1, dist2(m.x, m.y, tg.x, tg.y)) : 99, isP = tg === p;
   if (!m.aggro) {
     if (tg && td < 10.5 && (td < 5 || los(map, m.x, m.y, tg.x, tg.y))) aggroPack(m);
     return;
@@ -216,7 +256,7 @@ const ACT = {
     c.t += dt; const d = dist2(b.x, b.y, p.x, p.y), reach = b.r + p.r + 0.7;
     if (c.wind > 0) { c.wind -= dt; if (c.wind <= 0) { fx('slash', b.x, b.y, { ang: c.ang, rad: reach + 1.2, arc: 140, col: '#f66', dur: 0.2 }); hitCircle(b, b.x + Math.cos(c.ang) * 1.2, b.y + Math.sin(c.ang) * 1.2, reach + 0.6, bossHit(b, 1), 0); c.cd = 1.1 / b.rate; } }
     else if (d < reach && (c.cd || 0) <= 0) { c.wind = 0.4; c.ang = Math.atan2(p.y - b.y, p.x - b.x); }
-    else { c.cd = (c.cd || 0) - dt; if (d >= reach * 0.8) approach(b, p, b.spd * b.spdMul * slowMult(b), dt, map, true); }
+    else { c.cd = (c.cd || 0) - dt; if (d >= reach * 0.8) approach(b, p, b.spd * b.spdMul * slowMult(b), dt, map, p === G.p); }
     return c.t >= a.t;
   },
   burst(b, c, a, dt) {
@@ -230,12 +270,12 @@ const ACT = {
     return c.k >= a.rep;
   },
   slam(b, c, a, dt, p) {
-    if (!c.k) { c.k = 1; for (let i = 0; i < a.n; i++) { const sc = a.scatter && (i > 0 || a.n > 2) ? a.scatter : 0, an = rnd(0, 6.28), d = rnd(0, sc); addArea({ x: p.x + Math.cos(an) * d, y: p.y + Math.sin(an) * d, rad: a.rad, delay: a.delay + i * 0.12, src: b, vs: 0, mk: bossHit(b, a.m, a), col: DTC[b.dt], meteor: 1, ...zoneOf(b, a) }); } }
+    if (!c.k) { c.k = 1; for (let i = 0; i < a.n; i++) { const sc = a.scatter && (i > 0 || a.n > 2) ? a.scatter : 0, an = rnd(0, 6.28), d = rnd(0, sc), h = i > 0 ? rndHero(p) : p; addArea({ x: h.x + Math.cos(an) * d, y: h.y + Math.sin(an) * d, rad: a.rad, delay: a.delay + i * 0.12, src: b, vs: 0, mk: bossHit(b, a.m, a), col: DTC[b.dt], meteor: 1, ...zoneOf(b, a) }); } }
     return (c.t += dt) >= a.delay + 0.3;
   },
   rain(b, c, a, dt, p) {
     c.t += dt;
-    while (c.k * a.rate < c.t && c.t < a.t) { c.k++; const an = rnd(0, 6.28), d = rnd(0, a.scatter); addArea({ x: p.x + Math.cos(an) * d, y: p.y + Math.sin(an) * d, rad: a.rad, delay: a.delay, src: b, vs: 0, mk: bossHit(b, a.m, a), col: DTC[b.dt], ...zoneOf(b, a) }); }
+    while (c.k * a.rate < c.t && c.t < a.t) { c.k++; const an = rnd(0, 6.28), d = rnd(0, a.scatter), h = rndHero(p); addArea({ x: h.x + Math.cos(an) * d, y: h.y + Math.sin(an) * d, rad: a.rad, delay: a.delay, src: b, vs: 0, mk: bossHit(b, a.m, a), col: DTC[b.dt], ...zoneOf(b, a) }); }
     return c.t >= a.t;
   },
   line(b, c, a, dt, p, map) {
@@ -277,7 +317,7 @@ const ACT = {
 };
 
 export function updateBoss(b, dt) {
-  const z = G.zone, p = G.p, def = b.def;
+  const z = G.zone, p = pickTarget(b), def = b.def;
   if (b.inv > 0) b.inv -= dt;
   if (b.regen) heal(b, b.s.maxLife * b.regen / 100 * dt);
   if (b.dashTo) { const d = b.dashTo; d.t += dt; const k = Math.min(1, d.t / 0.22); b.x = d.x0 + (d.x - d.x0) * k; b.y = d.y0 + (d.y - d.y0) * k; if (k >= 1) b.dashTo = null; return; }
@@ -290,7 +330,8 @@ export function updateBoss(b, dt) {
     if (def.phases[b.ph].say) text(b.x, b.y - 2.5, def.phases[b.ph].say, '#ffd0a0', 18);
     for (const pr of z.projs) if (pr.src === b) pr.dead = true;
   }
-  if (b.wait > 0) { b.wait -= dt; if (dist2(b.x, b.y, p.x, p.y) > 4) approach(b, p, b.spd * 0.5 * slowMult(b), dt, z.map, true); return; }
+  if (z.run.group) groupMech(b, dt);
+  if (b.wait > 0) { b.wait -= dt; if (dist2(b.x, b.y, p.x, p.y) > 4) approach(b, p, b.spd * 0.5 * slowMult(b), dt, z.map, p === G.p); return; }
   const pat = def.phases[b.ph].pat;
   if (!b.cur) { const a = pat[b.pi % pat.length]; b.pi++; if (a.a === 'enrage' && b.enraged === b.ph) return; b.cur = { a, t: 0, k: 0 }; }
   const c = b.cur;

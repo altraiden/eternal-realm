@@ -91,5 +91,12 @@ bus.on('frame', (dt) => {
   mmT -= dt; if (mmT <= 0) { mmT = 0.15; drawMinimap(els['minimap']); }
   slowT -= dt; if (slowT <= 0) { slowT = 0.2; slowUpdate(); }
 });
-bus.on('zone', () => { rebuildBar(); slowUpdate(true); });
+bus.on('zone', () => {
+  rebuildBar(); slowUpdate(true);
+  const z = G.zone; if (!z || !$('#hud')) return;
+  let el = $('#zonecard'); if (!el) { el = document.createElement('div'); el.id = 'zonecard'; document.body.appendChild(el); }
+  const run = z.run, sub = run ? `${ACTIVITIES[run.act].n} · ${DIFFS[diffOf(run.tier)].n} ${run.tier}${run.floor > 1 ? ' · этаж ' + run.floor : ''}` : 'Последнее убежище человечества';
+  el.innerHTML = `<div class="zc-line"></div><div class="zc-name">${biomeOf(z.map.biome).n}</div><div class="zc-sub">${sub}</div><div class="zc-line"></div>`;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+});
 bus.on('statsChanged', () => { /* skill tooltips depend on stats; bar is rebuilt on skill change only */ });

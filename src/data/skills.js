@@ -72,6 +72,11 @@ export const SKILLS = {
   deathgrip: { n: 'Хватка смерти', c: 'dk', i: 'k_chain', tg: 'spell dark', t: 'chain', mana: 12, cd: 4, ct: 0.25, d: { dark: [120, 170] }, jumps: 3, rng: 11, pull: 1, ail: { stun: 100 }, desc: 'Притягивает до трёх врагов к себе и оглушает.' },
   armydead: { n: 'Армия мёртвых', c: 'dk', i: 'k_skull', tg: 'spell minion dark', t: 'summon', mana: 50, cd: 30, ct: 0.6, m: 'ghoul', n1: 5, max: 5, mdur: 15, desc: 'На 15 сек. поднимает пять упырей.' },
   boneshield: { n: 'Костяной щит', c: 'dk', i: 'k_shieldbash', tg: 'buff', t: 'buff', mana: 22, cd: 18, dur: 10, mods: [['dr', 22], ['thorns', 300], ['armor_inc', 40]], desc: '10 сек.: −22% получаемого урона, отражение урона.' },
+  // ---------------- Групповые навыки (доступны всем)
+  mend: { n: 'Исцеление', c: 'druid', i: 'k_leaf', tg: 'spell heal', t: 'heal', mana: 16, cd: 0, ct: 0.7, hpPct: 16, range: 11, desc: 'Лечит союзника под курсором (или самого раненого рядом) на 16% его здоровья.' },
+  healwave: { n: 'Целительная волна', c: 'monk', i: 'k_heart', tg: 'spell heal aoe', t: 'heal', mana: 30, cd: 6, ct: 0.6, hpPct: 14, rad: 7, desc: 'Лечит всех союзников в радиусе на 14% здоровья.' },
+  layhands: { n: 'Возложение рук', c: 'paladin', i: 'k_sun', tg: 'spell heal', t: 'heal', mana: 24, cd: 12, ct: 0.25, hpPct: 45, range: 11, desc: 'Мгновенно лечит союзника на 45% здоровья.' },
+  taunt: { n: 'Вызов', c: 'warrior', i: 'k_bell', tg: 'buff taunt', t: 'taunt', mana: 8, cd: 6, rad: 8, dur: 4, mods: [['dr', 12]], desc: 'Все враги вокруг переключаются на вас. 4 сек.: −12% получаемого урона.' },
 };
 
 // Minions summoned by skills. hp/dmg are multiples of the owner's level-scaled base.

@@ -15,6 +15,10 @@ import { genCave, genDungeon, genArena, genHub, updateFlow, walkable } from './w
 import { rollDrops, dropAt, addToBag, genItem, vendorStock } from './items.js';
 import { render, initRender, s2w, R } from './render.js';
 import { saveNow } from './save.js';
+import { mkHero, refreshActor, heroTick, heroDash } from './hero.js';
+import { spawnAllies, updateAlly, reviveHero } from './ally.js';
+import { botById, botSay, partyReward, claimInbox } from './bots.js';
+import { weekId } from './data/activities.js';
 import { rnd, rint, pick, shuffle, dist2, clamp, bus, chance } from './util.js';
 
 export const NPCS = {
@@ -22,6 +26,9 @@ export const NPCS = {
   smith: { n: 'Кузнец', spr: 'n_smith', fn: 'craft', fnName: 'Кузница' },
   merchant: { n: 'Торговец', spr: 'n_merchant', fn: 'vendor', fnName: 'Торговля' },
   rune: { n: 'Мастер рун', spr: 'n_rune', fn: 'runes', fnName: 'Руны навыков' },
+  auction: { n: 'Аукционист', spr: 'n_jewel', fn: 'auction', fnName: 'Аукцион' },
+  collector: { n: 'Коллекционер', spr: 'n_collector', fn: 'collector', fnName: 'Добыча владык' },
+  lfg: { n: 'Распорядительница', spr: 'n_ench', fn: 'lfg', fnName: 'Группы и рейды' },
   trainer: { n: 'Наставник', spr: 'n_trainer', fn: 'trainer', fnName: 'Специализация' },
   alch: { n: 'Алхимик', spr: 'n_alch', fn: 'alch', fnName: 'Зелья' },
   stash: { n: 'Хранилище', spr: null, fn: 'stash', fnName: 'Открыть', label: 1 },
@@ -30,26 +37,15 @@ export const NPCS = {
   villager: { n: 'Беженка', spr: 'n_villager' }, peasant: { n: 'Беженец', spr: 'n_peasant' }, king: { n: 'Последний король', spr: 'n_king' },
 };
 
-const mkZone = (map) => ({ map, actors: [], minions: [], bosses: [], projs: [], areas: [], drops: [], fx: [], texts: [], objs: [], run: null });
+const mkZone = (map) => ({ map, actors: [], minions: [], bosses: [], projs: [], areas: [], drops: [], fx: [], texts: [], objs: [], heroes: [], party: [], run: null });
 export const toast = (msg, col = '#ffd27a') => bus.emit('toast', msg, col);
 
 function makePlayer(x, y) {
-  const ch = G.ch, cls = CLASSES[ch.cls];
-  ch.flask ||= { max: 3, pow: 45 };
-  const p = mkActor({ kind: 'player', team: 0, cls: ch.cls, spr: cls.spr, x, y, r: 0.36, sc: 3, buffs: [], cdT: {}, pcd: {}, timers: [], pulses: [], iframe: 0, mech: { id: cls.mech.id, v: 0, t: 0, ready: false }, flask: { n: ch.flask.max, kills: 0 }, rollCd: 0, dirty: false });
-  G.p = p; refreshStats(true);
-  p.hp = p.s.maxLife; p.mp = p.s.maxMana;
+  const p = mkHero(G.ch, x, y, 'player', { threatMul: G.party && G.party.role === 'tank' ? 5 : 1, role: (G.party && G.party.role) || 'dps' });
+  G.p = p; bus.emit('statsChanged');
   return p;
 }
-export function refreshStats(full) {
-  const p = G.p; if (!p) return;
-  const f = p.s && p.s.maxLife > 1 ? [p.hp / p.s.maxLife, p.s.maxMana ? p.mp / p.s.maxMana : 1] : null;
-  p.s = calcStats(G.ch, p.buffs, G.zone && G.zone.run ? G.zone.run.fx : {});
-  if (full && f) { p.hp = p.s.maxLife * f[0]; p.mp = p.s.maxMana * f[1]; }
-  p.hp = Math.min(p.hp, p.s.maxLife); p.mp = Math.min(p.mp, p.s.maxMana);
-  resolveAll(p); p.dirty = false;
-  bus.emit('statsChanged');
-}
+export function refreshStats(full) { if (G.p) refreshActor(G.p, full); }
 
 // ------------------------------------------------------------------ hub
 export function enterHub() {
@@ -60,6 +56,15 @@ export function enterHub() {
   const top = Math.max(...Object.values(G.ch.prog.tier));
   G.vendor = vendorStock(CURVE.ilvl(top));
   if (G.pendingPortal) { z.objs.push({ kind: 'portal', x: map.portalPos.x, y: map.portalPos.y, cfg: G.pendingPortal, dwell: 0 }); }
+  z.heroes = [G.p];
+  // other "players" hanging around town
+  const pts = map.npcs;
+  for (const b of shuffle(G.save.world.bots.filter((x) => x.online && !(G.party && G.party.ids.includes(x.id)))).slice(0, 12)) {
+    let x = map.start.x, y = map.start.y;
+    for (let k = 0; k < 8; k++) { const n = pick(pts), nx = n.x + rnd(-2.5, 2.5), ny = n.y + rnd(0.8, 3); if (walkable(map, nx, ny)) { x = nx; y = ny; break; } }
+    z.actors.push(mkActor({ kind: 'npc', team: 2, x, y, name: `${b.ch.name} · ${b.ch.level}`, spr: CLASSES[b.ch.cls].spr, bot: b, sc: 3, r: 0.36, wander: { tx: x, ty: y, wait: rnd(0, 6), stuck: 0 } }));
+  }
+  claimInbox();
   saveNow(); bus.emit('zone');
 }
 export function openPortal(cfg) {
@@ -91,6 +96,14 @@ export function startRun(cfg) {
   const d = describeRun({ ...cfg, mods });
   const biome = cfg.act === 'boss' ? BOSSES[cfg.bossId].biome : pick(BIOME_IDS);
   const run = { act: cfg.act, tier: cfg.tier, baseTier: cfg.tier, mods, fx: d.fx, fxAll: d.fx, qty: d.qty, rar: d.rar, combo: d.combo, biome, mobPool: BIOMES[biome].mobs, seed: (Date.now() % 1e8) + rint(0, 9999), deaths: 0, maxDeaths: act.noDeath ? 0 : 3, kills: 0, state: 'active', floor: cfg.floor || 1, t: 0, bossId: cfg.bossId, need: 0, wave: 0, spawnT: 1, metT: 3 };
+  if (act.group) {
+    if (!G.party || !G.party.ids.length) { toast('Сначала соберите группу у Распорядительницы', '#f88'); return false; }
+    if (act.weekly && ch.prog.raidWeek === weekId()) { toast('Рейд уже пройден на этой неделе', '#f88'); return false; }
+    const n = G.party.ids.length + 1;
+    run.group = n; run.maxDeaths = 999; run.stage = 1; G.party.wipes = 0;
+    run.fx.mobHp = (run.fx.mobHp || 1) * n * 1.6; run.fx.mobDmg = (run.fx.mobDmg || 1) * 4.5;
+    run.partyCls = [ch.cls, ...G.party.ids.map((id) => botById(id).ch.cls)];
+  }
   ch.prog.runs++; G.pendingPortal = null;
   buildFloor(run);
   if (run.combo) toast('Секретное событие: ' + run.combo.n, '#36e0c8');
@@ -104,9 +117,9 @@ function buildFloor(run) {
   if (run.act === 'tower') { run.tier = 1 + Math.floor((run.floor - 1) * 0.8); run.biome = pick(BIOME_IDS); run.mobPool = BIOMES[run.biome].mobs; run.wave = 0; run.waves = run.floor % 5 === 0 ? 1 : 2 + (run.floor > 10 ? 1 : 0); run.cleared = false; }
   if (act.gen === 'cave') map = genCave(run.seed, run.biome, run.act === 'chaos' ? 72 : 86, Math.round((run.act === 'chaos' ? 18 : 26) * (fxr.mobCount || 1)));
   else if (act.gen === 'dungeon') map = genDungeon(run.seed + run.floor * 7919, run.biome, run.floor >= act.floors);
-  else map = genArena(run.seed + run.floor * 31, run.biome, run.act === 'rift' ? 15 : run.act === 'tower' ? 12 : 13, run.act === 'rift' ? 4 : 6);
+  else map = genArena(run.seed + run.floor * 31, run.biome, run.act === 'rift' ? 15 : run.act === 'raid' ? 16 : run.act === 'tower' ? 12 : 13, run.act === 'rift' ? 4 : 6);
   const z = mkZone(map); z.run = run; G.zone = z; run.env = envActor(run);
-  const p = makePlayer(map.start.x, map.start.y); z.actors.push(p);
+  const p = makePlayer(map.start.x, map.start.y); z.actors.push(p); z.heroes = [p]; spawnAllies();
   if (keep && run.floor > 1) { p.hp = p.s.maxLife * keep.hp; p.mp = p.s.maxMana * keep.mp; p.flask = keep.flask; }
   G.cam.x = p.x; G.cam.y = p.y;
   for (const c of map.chests) z.objs.push({ kind: 'chest', x: c.x, y: c.y, rich: c.rich });
@@ -118,9 +131,12 @@ function buildFloor(run) {
     for (let i = 0; i < n; i++) spawnPack(map.packs[i % map.packs.length], run);
     if (map.bossPos) {
       const ids = shuffle(BIOMES[run.biome].bosses.slice());
-      spawnBoss(ids[0], map.bossPos.x, map.bossPos.y, run, { hpMul: (run.act === 'dungeon' ? 0.55 : 0.45) * (fxr.awakened ? 2 : 1), awakened: fxr.awakened });
+      spawnBoss(ids[0], map.bossPos.x, map.bossPos.y, run, { hpMul: (run.act === 'gdungeon' ? 3.5 : run.act === 'dungeon' ? 0.55 : 0.45) * (fxr.awakened ? 2 : 1), awakened: fxr.awakened });
       if (fxr.bosses) spawnBoss(ids[1] || pick(BOSS_IDS), map.bossPos.x + 3, map.bossPos.y + 2, run, { hpMul: 0.35 });
     }
+  } else if (run.act === 'raid') {
+    run.raidIds ||= shuffle(BOSS_IDS.slice()).slice(0, act.stages);
+    spawnBoss(run.raidIds[run.stage - 1], map.bossPos.x, map.bossPos.y, run, { hpMul: 6 });
   } else if (run.act === 'boss') {
     spawnBoss(run.bossId, map.bossPos.x, map.bossPos.y, run, { hpMul: 1 });
     if (fxr.bosses) spawnBoss(pick(BOSS_IDS.filter((b) => b !== run.bossId)), map.bossPos.x + 4, map.bossPos.y, run, { hpMul: 0.5 });
@@ -146,6 +162,7 @@ const aliveMobs = () => { let n = 0; for (const a of G.zone.actors) if (a.kind =
 function updateRun(dt) {
   const z = G.zone, run = z.run, p = G.p, map = z.map, fxr = run.fx;
   run.t += dt;
+  if (run.group && groupTick(dt)) return;
   if (run.state === 'dead') { run.respawnT -= dt; if (run.respawnT <= 0) respawn(); return; }
   if (run.state === 'failed') { run.respawnT -= dt; if (run.respawnT <= 0) enterHub(); return; }
   if (fxr.degen && !p.dead) p.hp = Math.max(1, p.hp - p.s.maxLife * fxr.degen / 100 * dt);
@@ -169,7 +186,7 @@ function updateRun(dt) {
       run.cleared = true; G.ch.prog.towerBest = Math.max(G.ch.prog.towerBest, run.floor);
       const c = map.center; z.objs.push({ kind: 'stairs', x: c.x, y: c.y });
       dropAt(c.x, c.y + 1, { kind: 'mat', mid: 'shard', n: 1 + Math.floor(run.floor / 5) });
-      if (run.floor % 5 === 0) for (let i = 0; i < 4; i++) dropAt(c.x, c.y + 1, { kind: 'item', item: genItem(CURVE.ilvl(run.tier) + 2, { mf: 150 + (p.s.mf || 0), minRar: i === 0 ? 3 : 2 }) });
+      if (run.floor % 5 === 0) for (let i = 0; i < 4; i++) dropAt(c.x, c.y + 1, { kind: 'item', item: genItem(CURVE.ilvl(run.tier) + 2, { cls: G.ch.cls, mf: 150 + (p.s.mf || 0), minRar: i === 0 ? 3 : 2 }) });
       toast(`Этаж ${run.floor} зачищен. Лестница открыта.`); saveNow();
     }
   }
@@ -180,14 +197,24 @@ function updateRun(dt) {
       else if (run.spawnT <= 0 && aliveMobs() < Math.min(42, 12 + run.tier) * (fxr.mobCount || 1)) { run.spawnT = 0.55; ringSpawn(run, rint(5, 8)); }
     }
   }
-  const needBoss = run.act !== 'tower' && (run.act !== 'rift' || run.lord) && (run.act !== 'dungeon' || run.floor >= ACTIVITIES.dungeon.floors);
+  const act = ACTIVITIES[run.act];
+  if (run.act === 'raid' && z.bosses.length === 0 && run.bossSeen && run.stage < act.stages) {
+    run.nextT = (run.nextT ?? 8) - dt;
+    if (run.nextT <= 0) {
+      run.stage++; run.nextT = null; run.bossSeen = false;
+      for (const h of [p, ...z.party]) { reviveHero(h, 1); h.hp = h.s.maxLife; h.mp = h.s.maxMana; }
+      spawnBoss(run.raidIds[run.stage - 1], map.bossPos.x, map.bossPos.y, run, { hpMul: 6 }); toast(`Владыка ${run.stage} из ${act.stages} входит на арену`, '#ff4d4d'); G.cam.shake = 10;
+    }
+    return;
+  }
+  const needBoss = run.act !== 'tower' && (run.act !== 'rift' || run.lord) && (!act.floors || run.floor >= act.floors) && (!act.stages || run.stage >= act.stages);
   if (needBoss && z.bosses.length === 0 && run.bossSeen) completeRun();
 }
 
 function openChest(o) {
   const run = G.zone.run, p = G.p; o.used = true;
   const n = o.rich ? rint(4, 6) : rint(2, 3);
-  for (let i = 0; i < n; i++) dropAt(o.x, o.y, { kind: 'item', item: genItem(CURVE.ilvl(run.tier), { mf: (p.s.mf || 0) + run.rar + (o.rich ? 120 : 50), minRar: o.rich && i === 0 ? 2 : 0 }) });
+  for (let i = 0; i < n; i++) dropAt(o.x, o.y, { kind: 'item', item: genItem(CURVE.ilvl(run.tier), { cls: G.ch.cls, mf: (p.s.mf || 0) + run.rar + (o.rich ? 120 : 50), minRar: o.rich && i === 0 ? 2 : 0 }) });
   dropAt(o.x, o.y, { kind: 'gold', n: Math.round(CURVE.gold(run.tier) * rnd(8, 16) * (1 + (p.s.gf || 0) / 100)) });
   for (const id in ACTIVITIES[run.act].mats) if (chance(35 * ACTIVITIES[run.act].mats[id] * (o.rich ? 2 : 1))) dropAt(o.x, o.y, { kind: 'mat', mid: id, n: 1 });
   fx('ring', o.x, o.y, { rad: 1.5, col: '#ffd24a' });
@@ -201,10 +228,12 @@ function useShrine(o) { o.used = true; const s = pick(SHRINES); addBuff(G.p, { i
 function completeRun() {
   const z = G.zone, run = z.run, ch = G.ch, p = G.p, act = ACTIVITIES[run.act];
   run.state = 'done';
+  if (run.group) partyReward(run, true);
+  if (act.weekly) ch.prog.raidWeek = weekId();
   const cur = ch.prog.tier[run.act] || 1;
   if (run.tier >= cur && cur < 60) { ch.prog.tier[run.act] = cur + 1; toast(`${act.n}: открыт уровень ${cur + 1}`, '#36e0c8'); }
   const n = 2 + (run.act === 'chaos' ? 2 : 0) + (run.act === 'rift' && run.t < 150 ? 2 : 0);
-  for (let i = 0; i < n; i++) dropAt(p.x, p.y, { kind: 'item', item: genItem(CURVE.ilvl(run.tier) + 1, { mf: (p.s.mf || 0) + run.rar + 100, minRar: 2 }) });
+  for (let i = 0; i < n; i++) dropAt(p.x, p.y, { kind: 'item', item: genItem(CURVE.ilvl(run.tier) + 1, { cls: G.ch.cls, mf: (p.s.mf || 0) + run.rar + 100, minRar: 2 }) });
   for (const id in act.mats) dropAt(p.x, p.y, { kind: 'mat', mid: id, n: 1 + (chance(40) ? 1 : 0) });
   if (run.act === 'rift' && run.t < 150) toast('Быстрая зачистка: бонусная добыча!', '#36e0c8');
   z.objs.push({ kind: 'portal', x: p.x + 1.5, y: p.y - 1.5, dwell: 0 });
@@ -218,6 +247,7 @@ function respawn() {
 }
 bus.on('playerDeath', () => {
   const run = G.zone.run; if (!run) { G.p.dead = false; G.p.hp = G.p.s.maxLife; return; }
+  if (run.group) { G.ch.prog.deaths++; toast('Вы пали. Лекарь поднимет вас, если группа выстоит.', '#ff5a5a'); return; }
   G.ch.prog.deaths++; run.deaths++;
   run.stateBefore = run.state === 'done' ? 'done' : 'active';
   if (run.deaths > run.maxDeaths && run.state !== 'done') { run.state = 'failed'; run.respawnT = 3; toast(run.act === 'tower' ? `Восхождение окончено на этаже ${run.floor}.` : 'Попытки исчерпаны. Портал закрылся.', '#ff5a5a'); }
@@ -241,6 +271,45 @@ export function addXp(n) {
   let up = false;
   while (ch.level < 100 && ch.xp >= CURVE.xpNeed(ch.level)) { ch.xp -= CURVE.xpNeed(ch.level); ch.level++; ch.pp++; ch.attrPts += 5; up = true; }
   if (up) { toast(`Уровень ${ch.level}! +1 талант, +5 характеристик`, '#7be04a'); refreshStats(); G.p.hp = G.p.s.maxLife; G.p.mp = G.p.s.maxMana; fx('ring', G.p.x, G.p.y, { rad: 4, col: '#ffd24a', dur: 0.9 }); saveNow(); bus.emit('hud'); }
+}
+
+// ------------------------------------------------------------------ group content: wipes, resurrection, town life
+function groupTick(dt) {
+  const z = G.zone, run = z.run, p = G.p, all = [p, ...z.party];
+  if (run.wipeT != null) { run.wipeT -= dt; if (run.wipeT <= 0) doWipe(); return true; }
+  if (all.every((h) => h.dead)) { run.wipeT = 3; toast('Группа пала…', '#ff5a5a'); return true; }
+  if (all.some((h) => h.dead)) {
+    const fight = z.bosses.some((b) => !b.dead && b.engaged) || z.actors.some((m) => m.kind === 'mob' && !m.dead && m.aggro && all.some((h) => !h.dead && dist2(m.x, m.y, h.x, h.y) < 14));
+    run.rezT = fight ? 0 : (run.rezT || 0) + dt;
+    if (run.rezT > 6) { run.rezT = 0; const l = all.find((x) => !x.dead); for (const h of all) if (h.dead) { h.x = l.x; h.y = l.y; reviveHero(h, 0.6); } }
+  }
+  return false;
+}
+function doWipe() {
+  const z = G.zone, run = z.run, p = G.p, map = z.map;
+  run.wipeT = null; G.party.wipes++; z.areas = []; z.projs = [];
+  for (const m of z.actors) {
+    if (m.kind === 'minion') m.dead = true;
+    if (m.kind !== 'mob') continue;
+    if (m.add && m.owner) { m.dead = true; continue; }
+    m.hp = m.s.maxLife; m.threat = null; m.st = {}; m.x = m.home.x; m.y = m.home.y;
+    if (m.boss) Object.assign(m, { ph: 0, pi: 0, cur: null, engaged: false, enraged: undefined, spdMul: 1, dmgMul: 1, wait: 1.5, gT: undefined, dashTo: null }); else m.aggro = false;
+  }
+  const stay = [];
+  for (const a of z.party) { if (G.party.wipes > a.bot.pers.patience) { botSay(a.bot, 'leave', {}, 'party'); a.dead = true; a.gone = true; G.party.ids = G.party.ids.filter((id) => id !== a.bot.id); } else stay.push(a); }
+  z.party = stay; z.actors = z.actors.filter((a) => !a.gone);
+  [p, ...z.party].forEach((h, i) => { h.x = map.start.x + Math.cos(i * 1.3) * 1.3; h.y = map.start.y + Math.sin(i * 1.3) * 1.3; reviveHero(h, 1); h.hp = h.s.maxLife; h.mp = h.s.maxMana; });
+  if (z.party.length) botSay(pick(z.party).bot, 'wipe', {}, 'party');
+  G.cam.x = p.x; G.cam.y = p.y; toast(`Вайп №${G.party.wipes}. Группа собирается у входа.`, '#ff9a5a'); bus.emit('party');
+}
+bus.on('revive', (h) => reviveHero(h, 0.5));
+function wander(a, dt) {
+  const w = a.wander, map = G.zone.map;
+  if (w.wait > 0) { w.wait -= dt; return; }
+  const d = dist2(a.x, a.y, w.tx, w.ty);
+  if (d < 0.6 || w.stuck > 1.2) { w.wait = rnd(2, 10); const n = pick(map.npcs); w.tx = n.x + rnd(-2.5, 2.5); w.ty = n.y + rnd(0.8, 3); w.stuck = 0; return; }
+  const ox = a.x, oy = a.y; moveActor(a, ((w.tx - a.x) / d) * 2.6 * dt, ((w.ty - a.y) / d) * 2.6 * dt, map);
+  if (dist2(ox, oy, a.x, a.y) < 1.2 * dt) w.stuck += dt;
 }
 
 // ------------------------------------------------------------------ drops
@@ -287,26 +356,11 @@ export function useFlask() {
   fx('ring', p.x, p.y, { rad: 1.4, col: '#f44', dur: 0.4 });
 }
 function updatePlayer(dt) {
-  const p = G.p, z = G.zone, map = z.map, k = G.keys, s = p.s;
-  if (p.dirty) refreshStats();
-  let ch = false;
-  for (const b of p.buffs) { b.t -= dt; if (b.t <= 0) ch = true; }
-  if (ch) { p.buffs = p.buffs.filter((b) => b.t > 0); refreshStats(); }
-  if (p.dead) return;
-  const m = p.mech;
-  if (m.id === 'rage') { m.t -= dt; if (m.t <= 0 && m.v > 0) m.v = Math.max(0, m.v - 10 * dt); }
-  else if (m.id === 'combo' || m.id === 'souls') { if (m.v > 0) { m.t -= dt; if (m.t <= 0) m.v = 0; } }
-  else if (m.id === 'nature' && !m.ready) { m.t -= dt; if (m.t <= 0) m.ready = true; }
-  if (s.regen) heal(p, s.regen * dt);
-  p.mp = Math.min(s.maxMana, p.mp + s.manaRegen * dt);
-  if (p.iframe > 0) p.iframe -= dt;
-  tickStatuses(p, dt); if (p.dead) return;
-  if (p.dash) {
-    const d = p.dash; d.t += dt; const kk = Math.min(1, d.t / d.dur);
-    p.x = d.x0 + (d.x - d.x0) * kk; p.y = d.y0 + (d.y - d.y0) * kk; p.mv = 0.1;
-    if (kk >= 1) { p.dash = null; if (d.land) d.land(); }
-    updateCasting(p, dt); return;
-  }
+  const p = G.p, z = G.zone, map = z.map, k = G.keys;
+  if (!heroTick(p, dt)) return;
+  const s = p.s;
+  p.aim.x = G.mouse.wx; p.aim.y = G.mouse.wy;
+  if (heroDash(p, dt)) return;
   let dx = 0, dy = 0;
   if (k.KeyW || k.ArrowUp) { dx -= 1; dy -= 1; } if (k.KeyS || k.ArrowDown) { dx += 1; dy += 1; }
   if (k.KeyA || k.ArrowLeft) { dx -= 1; dy += 1; } if (k.KeyD || k.ArrowRight) { dx += 1; dy -= 1; }
@@ -314,7 +368,8 @@ function updatePlayer(dt) {
   if ((dx || dy) && !frozen) {
     const l = Math.hypot(dx, dy), sp = s.moveSpeed * slowMult(p) * (p.act && !p.act.fired ? 0.35 : 1);
     moveActor(p, (dx / l) * sp * dt, (dy / l) * sp * dt, map);
-    p.moveDir = [dx / l, dy / l];
+    if (!p.act) p.face = dx - dy >= 0 ? 1 : -1;
+    p.stepT = (p.stepT || 0) - dt; if (p.stepT <= 0) { p.stepT = 0.16; fx('dust', p.x, p.y, { dur: 0.45 }); }
   }
   if (p.mv > 0) p.mv -= dt;
   if (k.Space && !frozen && p.rollCd <= G.time) {
@@ -344,13 +399,15 @@ function update(dt) {
   G.time += dt; G.cam.shake *= 0.86;
   [G.mouse.wx, G.mouse.wy] = s2w(G.mouse.x, G.mouse.y);
   R.hover = null; for (const l of R.labels) if (G.mouse.x >= l.x && G.mouse.x <= l.x + l.w && G.mouse.y >= l.y && G.mouse.y <= l.y + l.h) { R.hover = l.id; break; }
+  z.heroes = z.party.length ? [p, ...z.party] : [p];
   updatePlayer(dt);
   if (G.zone !== z) return;
   if (z.run) { flowT -= dt; if (flowT <= 0) { flowT = 0.3; updateFlow(z.map, p.x, p.y); } }
   for (const a of z.actors) {
     if (a.dead || a === p) continue;
     if (a.flash > 0) a.flash -= dt; if (a.lunge > 0) a.lunge -= dt;
-    if (a.kind === 'npc') continue;
+    if (a.kind === 'npc') { if (a.wander) wander(a, dt); if (a.mv > 0) a.mv -= dt; continue; }
+    if (a.kind === 'ally') { updateAlly(a, dt); continue; }
     tickStatuses(a, dt); if (a.dead) continue;
     if (a.kind === 'minion') updateMinion(a, dt); else if (a.boss) updateBoss(a, dt); else updateMob(a, dt);
   }
@@ -362,7 +419,7 @@ function update(dt) {
   updateDrops(dt);
   if (z.run) { updateRun(dt); if (G.zone !== z) return; }
   if (z.actors.some((a) => a.dead && a !== p)) { z.actors = z.actors.filter((a) => !a.dead || a === p); z.minions = z.minions.filter((a) => !a.dead); z.bosses = z.bosses.filter((a) => !a.dead); }
-  G.cam.x += (p.x - G.cam.x) * Math.min(1, dt * 9); G.cam.y += (p.y - G.cam.y) * Math.min(1, dt * 9);
+  { const lx = clamp((G.mouse.wx - p.x) * 0.1, -1.4, 1.4), ly = clamp((G.mouse.wy - p.y) * 0.1, -1.4, 1.4), k = Math.min(1, dt * 7); G.cam.x += (p.x + (z.hub || p.dead ? 0 : lx) - G.cam.x) * k; G.cam.y += (p.y + (z.hub || p.dead ? 0 : ly) - G.cam.y) * k; }
   seenT -= dt;
   if (seenT <= 0 && !z.hub) { seenT = 0.2; const m = z.map, px = Math.floor(p.x), py = Math.floor(p.y); for (let j = -12; j <= 12; j++) for (let i = -12; i <= 12; i++) { const x = px + i, y = py + j; if (x >= 0 && y >= 0 && x < m.w && y < m.h && i * i + j * j < 150) m.seen[y * m.w + x] = 1; } }
   const w = G.dps.win; while (w.length && w[0][0] < G.time - 4) w.shift();
@@ -390,6 +447,7 @@ export function initGame(canvas) {
     if (!G.zone || G.paused) return;
     if (e.button === 0) {
       G.mouse.lConsumed = clickLabel();
+      if (!G.mouse.lConsumed && G.zone.hub) { const [wx, wy] = s2w(e.clientX, e.clientY); const b = G.zone.actors.find((a) => a.bot && a.kind === 'npc' && dist2(wx, wy, a.x - 0.6, a.y - 0.6) < 1); if (b) { bus.emit('inspect', b.bot.id); G.mouse.lConsumed = true; } }
       if (!G.mouse.lConsumed && G.zone.hub && G.zone.nearNpc) { const [wx, wy] = s2w(e.clientX, e.clientY); if (dist2(wx, wy, G.zone.nearNpc.x, G.zone.nearNpc.y - 0.5) < 1.6) bus.emit('npc', G.zone.nearNpc.fn); }
       G.mouse.l = true;
     } else if (e.button === 2) G.mouse.r = true;

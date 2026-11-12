@@ -178,7 +178,27 @@ export const UNIQUES = {
   bloodgod: U('Сердце Бога крови', 'dragonheart', [['life_inc', 12, 18], ['leech', 2, 3], ['dmg_inc', 15, 25]], { d: '#% больше урона, но на 15% меньше здоровья.', v: [35, 50], mods: [['dmg_more', 1], ['life_more', 0, -15]] }, 'Оно бьётся в такт вашему.', 'bloodgod'),
   ancientone: U('Чешуя Древнего разрушителя', 'plate', [['armor_inc', 90, 140], ['life', 200, 300], ['res_all', 15, 22], ['dr', 4, 6]], { d: 'При получении урона: на 4 сек. −#% получаемого урона (перезарядка 8 сек.).', v: [40, 50], proc: { on: 'hurt', ch: 100, cd: 8, act: 'buff', stat: 'dr', dur: 4, name: 'Древняя чешуя' } }, 'Старше гор, прочнее времени.', 'destroyer'),
 };
+// second wave: every boss has at least two exclusives
+Object.assign(UNIQUES, {
+  ashflail: U('Пепельный маятник', 'flail', [['wdmg_inc', 90, 130], ['add_fire', 40, 70], ['fire_inc', 25, 40]], { d: 'Удары с шансом 10% обрушивают метеор (#% урона удара).', v: [200, 280], proc: { on: 'hit', ch: 10, cd: 0.8, act: 'meteor', type: 'fire', rad: 2.8 } }, 'Каждый взмах — маленький закат.', 'ashking'),
+  queenshroud: U('Саван королевы', 'robe', [['mana', 100, 160], ['minionLife_inc', 40, 70], ['res_dark', 30, 40], ['life', 100, 160]], { d: 'Убийство с шансом #% призывает духа-помощника на 12 сек.', v: [30, 40], proc: { on: 'kill', chV: 1, cd: 0.4, act: 'summon', m: 'spirit', dur: 12, max: 6 } }, 'Сотканный из последних вздохов.', 'deadqueen'),
+  wintercrown: U('Корона вечной зимы', 'helm', [['armor', 220, 340], ['cold_inc', 35, 55], ['res_cold', 35, 45], ['sk_cold', 2, 2]], { d: 'При получении урона: на 4 сек. −#% получаемого урона (перезарядка 8 сек.).', v: [35, 45], proc: { on: 'hurt', ch: 100, cd: 8, act: 'buff', stat: 'dr', dur: 4, name: 'Ледяной панцирь' } }, 'Под ней не тает даже мысль.', 'frostlord'),
+  voidtendril: U('Щупальце бездны', 'wand', [['spell_inc', 50, 80], ['dark_inc', 30, 50], ['castSpeed_inc', 10, 16]], { d: 'Критические удары с шансом 30% вызывают цепную молнию (#% урона удара).', v: [90, 130], proc: { on: 'crit', ch: 30, cd: 0.3, act: 'chain', type: 'dark', jumps: 5 } }, 'Оно всё ещё шевелится.', 'worldeater'),
+  hellheart: U('Сердце преисподней', 'core', [['fire_inc', 35, 50], ['dark_inc', 35, 50], ['pen_all', 8, 12]], { d: 'Убитые враги взрываются, нанося #% своего здоровья огнём.', v: [18, 26], proc: { on: 'kill', ch: 100, cd: 0, act: 'explode', type: 'fire', rad: 3 } }, 'Горячее, чем ненависть.', 'archdemon'),
+  fatehand: U('Стрелка судьбы', 'dagger', [['wdmg_inc', 80, 120], ['atkSpeed_inc', 12, 18], ['crit', 4, 6], ['cdr', 10, 15]], { d: 'Удары с шансом #% наносят урон дважды.', v: [22, 30], proc: { on: 'hit', chV: 1, cd: 0, act: 'repeat' } }, 'Она всегда показывает на тебя.', 'timekeeper'),
+  bloodclaws: U('Кровавые когти', 'claw', [['wdmg_inc', 80, 120], ['leech', 1.5, 2.5], ['atkSpeed_inc', 10, 16], ['add_phys', 20, 40]], { d: 'Убийство: на 5 сек. +#% скорости атаки, заклинаний и бега.', v: [22, 30], proc: { on: 'kill', ch: 100, cd: 0, act: 'buff', stat: ['atkSpeed_inc', 'castSpeed_inc', 'moveSpeed_inc'], dur: 5, name: 'Кровавый раж' } }, 'Их не нужно точить.', 'bloodgod'),
+  destroyerfang: U('Клык разрушителя', 'greatsword', [['wdmg_inc', 120, 170], ['conv_fire', 50, 50], ['area_inc', 15, 25], ['bossDmg_inc', 15, 25]], { d: 'Удары с шансом 12% обрушивают метеор (#% урона удара).', v: [220, 300], proc: { on: 'hit', ch: 12, cd: 0.8, act: 'meteor', type: 'fire', rad: 3 } }, 'Вырван из пасти последнего дракона.', 'destroyer'),
+  triplemaw: U('Тройная пасть', 'bow', [['wdmg_inc', 80, 120], ['add_poison', 40, 70], ['proj_extra', 2, 2], ['poison_inc', 25, 40]], { d: 'Убитые враги оставляют ядовитое облако (#% урона удара в сек.).', v: [50, 80], proc: { on: 'kill', ch: 100, cd: 0.3, act: 'zone', type: 'poison', rad: 2.6, dur: 5 } }, 'Три стрелы — три укуса.', 'hydra'),
+  hydrascale: U('Чешуя гидры', 'leather', [['evasion', 300, 450], ['life', 140, 220], ['res_poison', 35, 45], ['lifeRegen', 30, 50]], { d: '+#% здоровья в секунду.', v: [1.5, 2.5], mods: [['lifeRegenPct', 1]] }, 'Отрастает быстрее, чем рвётся.', 'hydra'),
+  dragonspine: U('Хребет дракона', 'spear', [['wdmg_inc', 100, 150], ['add_cold', 40, 70], ['crit', 3, 5], ['cc_inc', 30, 50]], { d: 'Удары с шансом 20% вызывают ледяную вспышку (#% урона удара).', v: [110, 160], proc: { on: 'hit', ch: 20, cd: 0.5, act: 'nova', at: 'target', type: 'cold', rad: 3, ail: { chill: 100, freeze: 40 } } }, 'Позвонок к позвонку.', 'bonedragon'),
+  bonewings: U('Костяные крылья', 'talisman', [['minion_inc', 40, 60], ['minion_extra', 1, 1], ['dark_inc', 25, 40]], { d: '+1 к максимуму существ и #% больше их урона.', v: [30, 45], mods: [['minion_extra', 0, 1], ['minion_more', 1]] }, 'Они помнят небо.', 'bonedragon'),
+  chiefaxe: U('Секира вождя', 'halberd', [['wdmg_inc', 110, 160], ['atkSpeed_inc', 10, 15], ['melee_inc', 25, 40], ['str', 20, 35]], { d: 'Каждый удар даёт заряд (до 20, 4 сек.): +#% урона за заряд.', v: [2, 3], proc: { on: 'hit', ch: 100, cd: 0.1, act: 'stack', stat: 'dmg_inc', dur: 4, max: 20, name: 'Клич орды' } }, 'Кто держит секиру — тот и вождь.', 'warlord'),
+  hordebelt: U('Пояс орды', 'belt', [['life', 160, 240], ['str', 20, 30], ['armor', 150, 240], ['lifeOnKill', 40, 70]], { d: '#% больше урона при здоровье ниже 35%.', v: [45, 65], mods: [['lowLife_more', 1]] }, 'На нём зарубки по числу побед.', 'warlord'),
+  slimecrown: U('Корона слизи', 'crown', [['life', 140, 220], ['res_poison', 35, 45], ['poison_inc', 30, 50], ['allAttr', 10, 16]], { d: 'Убийство восстанавливает #% здоровья.', v: [3, 5], proc: { on: 'kill', ch: 100, cd: 0, act: 'heal' } }, 'Липкая, но королевская.', 'slimeking'),
+  slimering: U('Вязкое кольцо', 'ring', [['life', 80, 130], ['add_poison', 25, 45], ['dot_inc', 25, 40], ['mf', 15, 25]], { d: 'Убитые враги оставляют ядовитое облако (#% урона удара в сек.).', v: [40, 60], proc: { on: 'kill', ch: 100, cd: 0.4, act: 'zone', type: 'poison', rad: 2.4, dur: 4 } }, 'Снять его непросто.', 'slimeking'),
+});
 export const UNIQUE_IDS = Object.keys(UNIQUES);
+export const BOSS_UNIQUES = (bid) => UNIQUE_IDS.filter((u) => UNIQUES[u].boss === bid);
 
 // Crafting currencies and materials. src = main activity that drops it (see data/activities.js).
 export const MATS = {
@@ -191,6 +211,7 @@ export const MATS = {
   whet: { n: 'Точильный камень', i: 'u_whetstone', d: 'Повышает качество предмета (+2% базовых показателей, до 20%).' },
   ember: { n: 'Адское пламя', i: 'u_ember', d: 'Заточка предмета: +4% ко всем его свойствам за уровень (до +10).' },
   shard: { n: 'Осколок башни', i: 'u_essence', d: 'Пробуждение: превращает легендарный предмет в древний.' },
+  token: { n: 'Печать владыки', i: 'u_scroll', d: 'Падает с владык в Царстве боссов и в рейдах. Обменивается у Коллекционера на эксклюзивные предметы.' },
   key: { n: 'Ключ владыки', i: 'u_key2', d: 'Открывает врата в Царство боссов.' },
 };
 

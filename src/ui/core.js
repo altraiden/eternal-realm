@@ -28,8 +28,10 @@ export function showTip(html, x, y) {
 }
 export const hideTip = () => { tipEl().style.display = 'none'; };
 
+export const itemSources = {}; // extra tooltip sources registered by other UI modules
 export function getItem(ref) {
-  if (!ref) return null; const [src, k] = ref.split(':');
+  if (!ref) return null; const [src, k, k2] = ref.split(':');
+  if (itemSources[src]) return itemSources[src](k, k2);
   return src === 'bag' ? G.ch.bag[k] : src === 'eq' ? G.ch.equip[k] : src === 'stash' ? G.save.stash[k] : src === 'vend' ? G.vendor[k] : null;
 }
 export function cellHTML(it, ref, extra = '') {
@@ -53,7 +55,7 @@ export function itemTip(it, hd) {
 }
 export function itemTipCompare(it, ref) {
   let h = itemTip(it);
-  if (ref && !ref.startsWith('eq:')) { const eq = G.ch.equip[slotFor(G.ch, it)]; if (eq && eq !== it) h += itemTip(eq, 'Надето'); }
+  if (ref && !ref.startsWith('eq:') && !ref.startsWith('bot:')) { const eq = G.ch.equip[slotFor(G.ch, it)]; if (eq && eq !== it) h += itemTip(eq, 'Надето'); }
   return h;
 }
 export const matHTML = (id, n, MATS) => `<div class="mat" data-tip="${MATS[id].n}: ${MATS[id].d}">${iconHTML(MATS[id].i, 0, 20)}<span>${fmt(n)}</span></div>`;

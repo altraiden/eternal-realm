@@ -201,7 +201,7 @@ definePanel('vendor', {
     } else if (d.a === 'gamble') {
       const ilvl = CURVE.ilvl(Math.max(...Object.values(ch.prog.tier))), pr = gamblePrice(ilvl);
       if (ch.gold < pr) { toast(`Нужно ${pr} золота`, '#f88'); return false; }
-      const it = genItem(ilvl, { slot: d.k, mf: 60 + (G.p.s.mf || 0) }); if (addToBag(ch, it) < 0) { toast('Сумка полна', '#f88'); return false; }
+      const it = genItem(ilvl, { slot: d.k, cls: ch.cls, mf: 60 + (G.p.s.mf || 0) }); if (addToBag(ch, it) < 0) { toast('Сумка полна', '#f88'); return false; }
       ch.gold -= pr; toast('Получено: ' + it.name, RAR[it.rar].c); saveNow();
     }
   },
@@ -305,7 +305,7 @@ export function showTitle() {
   let pickCls = CLASS_IDS[0];
   const draw = () => {
     const chars = G.save.chars, c = CLASSES[pickCls];
-    scr.innerHTML = `<div class="col" style="align-items:center;padding:24px;max-width:860px"><h1 class="title">ETERNAL REALM</h1><div class="sub">ЭНДГЕЙМ С ПЕРВОЙ МИНУТЫ</div>
+    scr.innerHTML = `<div class="embers">${Array.from({ length: 46 }, (_, i) => `<i style="left:${(i * 37) % 100}%;animation-delay:-${(i * 1.7) % 14}s;animation-duration:${9 + (i * 3) % 9}s;width:${1 + (i % 3)}px;height:${1 + (i % 3)}px"></i>`).join('')}</div><div class="col titlebox" style="align-items:center;padding:24px;max-width:860px"><div class="crest">✦</div><h1 class="title">ETERNAL REALM</h1><div class="sub">ЭНДГЕЙМ С ПЕРВОЙ МИНУТЫ</div>
     ${chars.length ? `<h3>Ваши герои</h3><div class="row wrap" style="justify-content:center">${chars.map((ch, i) => `<div class="card" data-a="play" data-k="${i}" style="text-align:center;width:150px">${iconHTML(CLASSES[ch.cls].spr, 0, 64)}<h4>${esc(ch.name)}</h4><div class="dim small">${CLASSES[ch.cls].n} · ур. ${ch.level}</div><button data-a="del" data-k="${i}" class="small" style="margin-top:4px;padding:1px 8px">удалить</button></div>`).join('')}</div>` : ''}
     <h3 style="margin-top:18px">Новый герой</h3><div class="classes">${CLASS_IDS.map((id) => `<div class="card${id === pickCls ? ' on' : ''}" data-a="cls" data-k="${id}">${iconHTML(CLASSES[id].spr, 0, 64)}<h4>${CLASSES[id].n}</h4></div>`).join('')}</div>
     <div class="tip" style="max-width:780px;width:100%;margin-top:8px"><div class="nm gold">${c.n}</div><div>${c.desc}</div><div class="sep"></div><div><b class="gold">${c.mech.n}.</b> ${c.mech.d}</div><div class="dim small">Специализации: ${c.specs.map((s) => s.n).join(' · ')}</div><div class="dim small">Стартовые навыки: ${c.bar.map((s) => SKILLS[s].n).join(', ')}</div></div>

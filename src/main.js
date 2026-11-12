@@ -10,15 +10,18 @@ const { initUICore } = uicore;
 import './ui/hud.js';
 import './ui/tree.js';
 import { showTitle } from './ui/panels.js';
+import './ui/social.js';
+import * as bots from './bots.js';
 
 async function boot() {
   await loadAtlas();
   loadSave();
+  bots.initWorld();
   initUICore();
   initGame(document.getElementById('game'));
   bus.on('flask', useFlask);
   window.addEventListener('beforeunload', saveNow);
   showTitle();
-  window.__G = G; window.__game = game; window.__ui = uicore; // handy for debugging in the console
+  window.__G = G; window.__game = game; window.__ui = uicore; window.__bots = bots; // handy for debugging in the console
 }
 boot().catch((e) => { document.body.innerHTML = '<pre style="color:#f88;padding:20px">Ошибка запуска: ' + e + '</pre>'; console.error(e); });

@@ -201,6 +201,9 @@ export function genHub() {
   D('d_banner', c + 10.5, c + 1.5, 4); N('trainer', c + 9.5, c + 2.5);
   D('d_runepillar', c - 3.5, c - 6.5, 4, 1, '#b06bff'); D('d_runepillar', c + 4.5, c - 6.5, 4, 1, '#b06bff'); N('portal', c + 2.5, c - 4.5);
   D('d_cauldron', c - 9.5, c + 6.5, 3, 1, '#7be04a'); N('alch', c - 8.5, c + 7.5);
+  D('d_stall', c + 10.5, c + 11.5, 5, 1, null, 1); N('auction', c + 9.5, c + 12.5);
+  D('d_bookshelf', c - 12.5, c - 9.5, 4); N('collector', c - 11.5, c - 8.5);
+  D('d_banner', c - 3.5, c - 3.5, 4); N('lfg', c - 2.5, c - 2.5);
   N('guard', c - 2.5, c + 14.5); N('guard2', c + 3.5, c + 14.5); N('villager', c + 9.5, c + 9.5); N('peasant', c - 4.5, c + 10.5); N('king', c + 0.5, c - 12.5);
   D('d_throne', c + 0.5, c - 13.5, 4);
   for (const [x, y] of [[c - 6, c - 12], [c + 7, c - 12], [c - 14, c - 6], [c + 15, c - 6], [c - 14, c + 7], [c + 15, c + 7], [c - 6, c + 13], [c + 7, c + 13], [c - 3, c + 3], [c + 4, c + 3]]) D('d_lantern', x + 0.5, y + 0.5, 3, 1, '#ffb060');

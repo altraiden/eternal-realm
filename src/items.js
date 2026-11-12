@@ -1,10 +1,12 @@
 // Item generation, loot tables, inventory operations and crafting.
 import { G } from './state.js';
-import { BASES, BASE_IDS, AFFIXES, AFFIX_BY_ID, POWERS, POWER_IDS, UNIQUES, UNIQUE_IDS, SLOT_CODE, MATS, RARE_NAMES_A, RARE_NAMES_B } from './data/items.js';
+import { BASES, BASE_IDS, AFFIXES, AFFIX_BY_ID, POWERS, POWER_IDS, UNIQUES, UNIQUE_IDS, BOSS_UNIQUES, SLOT_CODE, MATS, RARE_NAMES_A, RARE_NAMES_B } from './data/items.js';
+import { classBases, CLASS_ARCH, W_BASE, W_ARCH, W_TANK } from './data/social.js';
+import { itemInfo } from './stats.js';
 import { RAR } from './data/defs.js';
 import { ACTIVITIES, CURVE } from './data/activities.js';
 import { SUPPORT_IDS } from './data/supports.js';
-import { rnd, rint, pick, wpick, chance, uid } from './util.js';
+import { rnd, rint, pick, wpick, chance, uid, bus } from './util.js';
 
 const SLOT_LIST = ['helm', 'chest', 'gloves', 'boots', 'belt', 'amulet', 'ring', 'mainhand', 'mainhand', 'offhand', 'relic', 'artifact'];
 const basesOf = (slot) => BASE_IDS.filter((b) => BASES[b].s === slot);
@@ -40,10 +42,16 @@ export function genItem(ilvl, o = {}) {
   let uniq = o.uniq || null;
   if (rar === 5 && !uniq) {
     const pool = UNIQUE_IDS.filter((u) => (o.boss ? UNIQUES[u].boss === o.boss || !UNIQUES[u].boss : !UNIQUES[u].boss) && (!o.slot || BASES[UNIQUES[u].base].s === o.slot));
-    if (pool.length) uniq = o.boss && chance(45) && pool.some((u) => UNIQUES[u].boss) ? pick(pool.filter((u) => UNIQUES[u].boss)) : pick(pool); else rar = 4;
+    const mine = o.cls ? pool.filter((u) => classBases(o.cls).includes(UNIQUES[u].base)) : [];
+    if (o.exclusive && BOSS_UNIQUES(o.boss).length) { const ex = BOSS_UNIQUES(o.boss), exMine = o.cls ? ex.filter((u) => classBases(o.cls).includes(UNIQUES[u].base)) : []; uniq = exMine.length && chance(60) ? pick(exMine) : pick(ex); }
+    else if (pool.length) uniq = o.boss && chance(45) && pool.some((u) => UNIQUES[u].boss) ? pick(pool.filter((u) => UNIQUES[u].boss)) : mine.length && chance(70) ? pick(mine) : pick(pool); else rar = 4;
   }
   if (uniq) { base = UNIQUES[uniq].base; rar = 5; }
-  if (!base) base = pick(basesOf(o.slot || pick(SLOT_LIST)));
+  if (!base) {
+    let pool = basesOf(o.slot || pick(SLOT_LIST));
+    if (o.cls && chance(o.smart ?? 70)) { const cb = classBases(o.cls), f = pool.filter((b) => cb.includes(b)); if (f.length) pool = f; } // smart loot
+    base = pick(pool);
+  }
   const B = BASES[base];
   const it = { uid: uid(), base, rar, ilvl, v: rint(0, 7), q: 0, up: 0, aff: [], pw: [], imp: (B.imp || []).map(() => roll(rar)) };
   if (uniq) { it.uniq = uniq; it.ur = UNIQUES[uniq].mods.map(() => Math.random()); it.pr = Math.random(); }
@@ -54,6 +62,15 @@ export function genItem(ilvl, o = {}) {
   }
   it.name = nameItem(it);
   return it;
+}
+// How good an item is for a class / role (used by bots, loot rolls and the ladder).
+export const usable = (cls, it) => classBases(cls).includes(it.base);
+export function itemScore(it, cls, role) {
+  const info = itemInfo(it), arch = W_ARCH[CLASS_ARCH[cls]]; let sc = 0;
+  for (const [stat, v] of info.mods) { let w = (W_BASE[stat] || 0) + (arch[stat] || 0); if (role === 'tank' && W_TANK[stat]) w *= W_TANK[stat]; sc += v * w; }
+  if (info.wpn && arch.wdps) sc += ((info.wpn.min + info.wpn.max) / 2) * info.wpn.aps * arch.wdps;
+  if (info.procs.length || info.pow.length) sc += 60 * info.pow.length;
+  return sc;
 }
 export const sellValue = (it) => Math.round(Math.max(4, it.ilvl - 62) * 2.2 * Math.pow(1 + it.rar, 1.5));
 export const itemSprite = (it) => [BASES[it.base].spr, it.v];
@@ -75,8 +92,17 @@ export function rollDrops(m, run, p) {
   let nItems = 0;
   if (boss) nItems = rint(7, 10) + (m.awakened ? 4 : 0); else if (m.boss) nItems = rint(3, 5); else if (rare) nItems = rint(2, 4); else if (magic) nItems = chance(55 * qty) ? 1 : 0; else nItems = chance((m.add ? 2 : 8) * qty) ? 1 : 0;
   if (m.def && m.def.rich) nItems += 4;
-  for (let i = 0; i < nItems; i++) dropAt(m.x, m.y, { kind: 'item', item: genItem(ilvl + (boss ? 2 : rare ? 1 : 0), { mf: mf + (boss ? 150 : rare ? 60 : 0), minRar: boss && i === 0 ? 3 : rare && i === 0 ? 2 : 0, boss: boss ? m.bid : null }) });
-  if (boss && chance(run.act === 'boss' ? 30 + t : 6)) dropAt(m.x, m.y, { kind: 'item', item: genItem(ilvl + 2, { rar: 5, boss: m.bid }) });
+  const grp = run.group, lootCls = () => (grp ? pick(run.partyCls) : G.ch.cls);
+  const out = (item) => { if (grp && (m.boss || (rare && item.rar >= 3))) bus.emit('groupLoot', item); else dropAt(m.x, m.y, { kind: 'item', item }); };
+  if (grp && boss) nItems = grp >= 10 ? 5 : 3;
+  for (let i = 0; i < nItems; i++) out(genItem(ilvl + (boss ? 2 : rare ? 1 : 0), { cls: lootCls(), mf: mf + (boss ? 150 : rare ? 60 : 0), minRar: boss && i === 0 ? 3 : rare && i === 0 ? 2 : 0, boss: boss ? m.bid : null }));
+  if (boss) {
+    // exclusive drop with bad-luck protection: every miss in the Boss realm / raid raises the next chance
+    const big = run.act === 'boss' || run.act === 'raid', pity = (G.ch.prog.pity ||= {});
+    const c = big ? Math.min(100, 30 + t + (pity[m.bid] || 0) * 9) : 6;
+    if (chance(c)) { out(genItem(ilvl + 2, { rar: 5, boss: m.bid, exclusive: true, cls: lootCls() })); if (big) pity[m.bid] = 0; } else if (big) pity[m.bid] = (pity[m.bid] || 0) + 1;
+    if (big) dropAt(m.x, m.y, { kind: 'mat', mid: 'token', n: run.act === 'raid' ? 2 : rint(1, 2) }); else if (run.act === 'gdungeon') dropAt(m.x, m.y, { kind: 'mat', mid: 'token', n: 1 });
+  }
   if (chance(m.add ? 8 : 38) || m.elite || m.boss) dropAt(m.x, m.y, { kind: 'gold', n: Math.round(CURVE.gold(t) * rnd(0.6, 1.6) * (1 + (p.s.gf || 0) / 100) * (boss ? 40 : m.boss ? 15 : rare ? 8 : magic ? 2.5 : 1)) });
   const mm = boss ? 60 : m.boss ? 25 : rare ? 7 : magic ? 2 : m.add ? 0.2 : 1;
   for (const id in act.mats) { let c = 1.5 * act.mats[id] * mm * qty; while (c > 0) { if (chance(Math.min(100, c))) dropAt(m.x, m.y, { kind: 'mat', mid: id, n: 1 }); c -= 100; } }

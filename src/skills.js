@@ -18,7 +18,7 @@ export function resolveSkill(p, id) {
   for (const t of TAG_LV) if (sk.tags.includes(t)) lvl += s['sk_' + t] || 0;
   sk.lvl = Math.max(1, lvl);
   let more = 1, cost = 1, speed = 0;
-  const sups = (G.ch.skills.sup[id] || []).slice(0, maxSockets(s.level)).filter((x) => SUPPORTS[x] && supOK(def, SUPPORTS[x]));
+  const sups = (p.ch.skills.sup[id] || []).slice(0, maxSockets(s.level)).filter((x) => SUPPORTS[x] && supOK(def, SUPPORTS[x]));
   sk.sups = sups;
   for (const x of sups) {
     const S = SUPPORTS[x];
@@ -58,12 +58,12 @@ function primaryType(sk) {
 }
 export function resolveAll(p) {
   p.sk = {};
-  for (const id of G.ch.skills.bar) if (id) p.sk[id] = resolveSkill(p, id);
+  for (const id of p.ch.skills.bar) if (id) p.sk[id] = resolveSkill(p, id);
 }
 
 // Rough DPS number for the skill tooltip.
 export function skillDps(p, sk) {
-  if (sk.t === 'summon' || sk.t === 'buff' && !sk.pulse || sk.t === 'dash' && !sk.end || sk.t === 'curse' && !sk.d) return 0;
+  if (sk.t === 'heal' || sk.t === 'taunt' || sk.t === 'summon' || sk.t === 'buff' && !sk.pulse || sk.t === 'dash' && !sk.end || sk.t === 'curse' && !sk.d) return 0;
   let sum = 0;
   for (let i = 0; i < 24; i++) { const h = buildHit(p, sk); let d = 0; for (const t in h.dmg) d += h.dmg[t]; sum += d * (h.crit ? h.critMult : 1); }
   const per = sum / 24, period = sk.wind + sk.rec;
@@ -79,15 +79,16 @@ export function canUse(p, sk) {
   return null;
 }
 
-export function useSkill(p, slot) {
-  const id = G.ch.skills.bar[slot]; if (!id || p.act || p.dead) return false;
+export const useSkill = (p, slot) => castSkill(p, p.ch.skills.bar[slot]);
+export function castSkill(p, id) {
+  if (!id || p.act || p.dead) return false;
   const sk = p.sk[id];
   const why = canUse(p, sk);
-  if (why) { if (why !== 'перезарядка' && (p.warnT || 0) < G.time) { p.warnT = G.time + 0.8; text(p.x, p.y - 1, why, '#f88', 12); } return false; }
+  if (why) { if (p === G.p && why !== 'перезарядка' && (p.warnT || 0) < G.time) { p.warnT = G.time + 0.8; text(p.x, p.y - 1, why, '#f88', 12); } return false; }
   let wind = sk.wind, rec = sk.rec;
   if (p.mech && p.mech.id === 'combo') { const k = 1 + p.mech.v * 0.03; wind /= k; rec /= k; }
   p.act = { sk, t: wind, rec, fired: false };
-  p.face = G.mouse.wx - G.mouse.wy >= p.x - p.y ? 1 : -1;
+  p.face = p.aim.x - p.aim.y >= p.x - p.y ? 1 : -1;
   return true;
 }
 
@@ -105,9 +106,9 @@ export function updateCasting(p, dt) {
         if (sk.cd > 0) p.cdT[sk.id] = G.time + sk.cd;
         const m = p.mech;
         if (m && m.id === 'combo') { if (m.last !== sk.id) m.v = Math.min(5, m.v + 1); m.last = sk.id; m.t = 5; }
-        exec(p, sk, G.mouse.wx, G.mouse.wy, { mult: bonus });
+        exec(p, sk, p.aim.x, p.aim.y, { mult: bonus });
         if (m && m.id === 'nature' && m.ready) { m.ready = false; m.t = 5; heal(p, p.s.maxLife * 0.06); }
-        if (sk.echo) p.timers.push({ t: 0.28, fn: () => exec(p, sk, G.mouse.wx, G.mouse.wy, { mult: bonus, echo: true }) });
+        if (sk.echo) p.timers.push({ t: 0.28, fn: () => exec(p, sk, p.aim.x, p.aim.y, { mult: bonus, echo: true }) });
       }
     } else { a.rec -= dt; if (a.rec <= 0) p.act = null; }
   }
@@ -227,6 +228,24 @@ export function exec(p, sk, tx, ty, o = {}) {
       break;
     }
     case 'summon': bus.emit('summonSkill', { p, sk, x: tx, y: ty }); break;
+    case 'heal': {
+      const hs = G.zone.heroes.filter((h) => !h.dead); let tg;
+      if (sk.rad) tg = hs.filter((h) => dist2(p.x, p.y, h.x, h.y) <= sk.rad);
+      else {
+        let best = null, bd = 2.5;
+        for (const h of hs) { const d = dist2(tx, ty, h.x, h.y); if (d < bd && dist2(p.x, p.y, h.x, h.y) <= sk.range) { bd = d; best = h; } }
+        if (!best) { let bf = 0.999; for (const h of hs) { const f = h.hp / h.s.maxLife; if (f < bf && dist2(p.x, p.y, h.x, h.y) <= sk.range) { bf = f; best = h; } } }
+        tg = [best || p];
+      }
+      let total = 0;
+      for (const h of tg) { const v = Math.min(h.s.maxLife - h.hp, h.s.maxLife * (sk.hpPct / 100) * (1 + 0.04 * (sk.lvl - 1)) * (1 + (p.s.holy_inc || 0) / 300) * mult); if (v <= 0) continue; heal(h, v); total += v; fx('ring', h.x, h.y, { rad: 1.1, col: '#7be04a', dur: 0.4 }); if (h === G.p || p === G.p) text(h.x, h.y - 0.4, '+' + Math.round(v), '#7be04a', 13); }
+      p.healDone = (p.healDone || 0) + total; bus.emit('healed', p, total);
+      break;
+    }
+    case 'taunt':
+      addBuff(p, { id: 'sk_' + sk.id, name: sk.n, t: sk.dur, mods: sk.mods || [] });
+      fx('ring', p.x, p.y, { rad: sk.rad, col: '#6f8fff', dur: 0.5 }); bus.emit('taunt', p, sk.rad);
+      break;
     case 'buff':
       addBuff(p, { id: 'sk_' + sk.id, name: sk.n, t: sk.dur, mods: sk.mods || [], icon: sk.i });
       fx('ring', p.x, p.y, { rad: 1.6, col: '#ffd27a', dur: 0.4 });

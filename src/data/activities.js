@@ -30,8 +30,20 @@ export const ACTIVITIES = {
     desc: 'Измерение с тремя случайными правилами хаоса, которые нельзя убрать. Награды значительно выше.',
     goal: 'Выживите и убейте босса.', mats: { annul: 0.8, divine: 0.5, chaos: 1, exalt: 0.4 },
   },
+  gdungeon: {
+    n: 'Чертоги на пятерых', i: 'd_gatehouse', gen: 'dungeon', keyCost: 0, floors: 2, group: 5,
+    desc: 'Групповое подземелье для пяти героев: танк, лекарь и три бойца. Монстры втрое крепче и бьют больнее, боссы используют групповые механики. Добыча боссов разыгрывается броском.',
+    goal: 'Пройдите два этажа и убейте стража.', mats: { exalt: 0.8, regal: 0.6, divine: 0.3 },
+  },
+  raid: {
+    n: 'Межпространственный рейд', i: 'd_gate', gen: 'arena', keyCost: 0, group: 10, stages: 3, weekly: 1,
+    desc: 'Десять героев, три владыки подряд. Групповые механики, розыгрыш добычи, Печати владыки. Сохранение — раз в неделю.',
+    goal: 'Убейте трёх владык подряд.', mats: { divine: 1.5, shard: 0.5 },
+  },
 };
-export const ACT_IDS = Object.keys(ACTIVITIES);
+export const ACT_IDS = Object.keys(ACTIVITIES).filter((a) => !ACTIVITIES[a].group);
+export const GROUP_IDS = Object.keys(ACTIVITIES).filter((a) => ACTIVITIES[a].group);
+export const weekId = () => Math.floor((Date.now() / 86400000 + 3) / 7);
 
 // qty / rar = % bonus to item quantity / rarity. fx is read by the run logic.
 export const PORTAL_MODS = {
