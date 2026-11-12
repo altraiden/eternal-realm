@@ -1,0 +1,41 @@
+// Skill modifiers ("руны навыков"). Socketed into skills; they change how the skill behaves.
+// req: tags any-of (skill must have one). not: tags the skill must not have.
+// Fields: more (% more damage), cost (% mana cost), plus engine params merged into the skill (add:{} numeric adds, set:{} overrides).
+export const SUPPORTS = {
+  multi: { n: 'Расщепление', i: 'g_topaz', req: ['proj'], more: -25, cost: 30, add: { n1: 4, spread: 30 }, d: '+4 снаряда (всего 5 из одного), −25% урона.' },
+  pierce: { n: 'Пробивание', i: 'g_sapphire', req: ['proj'], more: 0, cost: 15, add: { pierce: 3 }, d: 'Снаряды пробивают ещё 3 врагов.' },
+  chain: { n: 'Рикошет', i: 'g_sapphire', req: ['proj', 'chain'], more: -15, cost: 20, add: { chain: 2, jumps: 3 }, d: 'Снаряды отскакивают к 2 целям; цепи +3 скачка. −15% урона.' },
+  fork: { n: 'Раздвоение', i: 'g_emerald', req: ['proj'], more: -10, cost: 15, add: { fork: 1 }, d: 'При попадании снаряд раздваивается.' },
+  explode: { n: 'Взрыв при попадании', i: 'g_ruby', req: ['proj'], more: 0, cost: 25, add: { expl: 1.6 }, tags: ['aoe'], d: 'Снаряды взрываются по области.' },
+  burnzone: { n: 'Горящая земля', i: 'g_ruby', req: ['proj', 'aoe', 'melee'], more: 0, cost: 25, set: { leaveZone: { dur: 4, tick: 0.15, every: 0.5, type: 'fire', rad: 1.8 } }, d: 'Попадания оставляют горящую землю (15% урона за тик, 4 сек.).' },
+  ret: { n: 'Возвращение', i: 'g_emerald', req: ['proj'], more: -10, cost: 20, set: { ret: 1 }, d: 'Снаряды возвращаются к вам, поражая врагов повторно.' },
+  homing: { n: 'Самонаведение', i: 'g_amethyst', req: ['proj'], more: -10, cost: 10, set: { home: 1 }, d: 'Снаряды сами находят цель.' },
+  meteorize: { n: 'Падение с небес', i: 'g_ruby', req: ['proj'], not: ['bow'], more: 30, cost: 40, set: { toGround: { rad: 2.6, delay: 0.7 } }, tags: ['aoe'], d: 'Снаряд превращается в удар с небес по области. +30% урона.' },
+  dragon: { n: 'Огненный змей', i: 'g_ruby', req: ['proj'], more: 15, cost: 50, set: { hitcd: 0.35, home: 1, serpent: 1 }, add: { pierce: 99, life: 2.5, rad: 0.5 }, mul: { spd: 0.55 }, d: 'Снаряд становится змеем: медленно летит, сам ищет врагов и жжёт всех на пути.' },
+  area: { n: 'Расширение', i: 'g_emerald', req: ['aoe'], more: -10, cost: 20, mul: { rad: 1.4, expl: 1.4 }, d: '+40% радиуса, −10% урона.' },
+  conc: { n: 'Концентрация', i: 'g_diamond', req: ['aoe'], more: 35, cost: 20, mul: { rad: 0.75, expl: 0.75 }, d: '−25% радиуса, +35% урона.' },
+  faster: { n: 'Ускорение', i: 'g_topaz', req: ['attack', 'spell'], more: 0, cost: 20, speed: 30, d: '+30% скорости применения.' },
+  brutal: { n: 'Чистая мощь', i: 'g_diamond', req: ['attack', 'spell'], more: 35, cost: 30, set: { noAil: 1 }, d: '+35% урона, но навык не накладывает стихийные эффекты.' },
+  crit: { n: 'Точность', i: 'g_diamond', req: ['attack', 'spell'], more: 0, cost: 20, add: { crit: 6 }, critMulti: 40, d: '+6% шанса крита и +40% крит. множителя для навыка.' },
+  leech: { n: 'Вампиризм', i: 'g_ruby', req: ['attack', 'spell'], more: 0, cost: 20, add: { leech: 3 }, d: '3% урона навыка лечит вас.' },
+  echo: { n: 'Эхо', i: 'g_amethyst', req: ['spell', 'attack'], not: ['minion', 'buff', 'move', 'trap'], more: -20, cost: 40, set: { echo: 1 }, d: 'Навык срабатывает повторно через мгновение. −20% урона.' },
+  fire: { n: 'Пламя', i: 'g_ruby', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 10, cost: 15, set: { infuse: 'fire' }, tags: ['fire'], ail: { ignite: 40 }, d: '50% урона превращается в огонь, +40% шанс поджечь.' },
+  cold: { n: 'Иней', i: 'g_sapphire', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 10, cost: 15, set: { infuse: 'cold' }, tags: ['cold'], ail: { chill: 60 }, d: '50% урона превращается в холод, +60% шанс охладить.' },
+  light: { n: 'Гроза', i: 'g_topaz', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 10, cost: 15, set: { infuse: 'light' }, tags: ['light'], ail: { shock: 40 }, d: '50% урона превращается в молнию, +40% шанс шока.' },
+  dark: { n: 'Мрак', i: 'g_amethyst', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 10, cost: 15, set: { infuse: 'dark' }, tags: ['dark'], d: '50% урона превращается в тьму.' },
+  poison: { n: 'Отрава', i: 'g_emerald', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 0, cost: 15, ail: { poison: 60 }, d: '+60% шанс отравить.' },
+  bleed: { n: 'Рваные раны', i: 'g_ruby', req: ['attack'], more: 0, cost: 15, ail: { bleed: 60 }, d: '+60% шанс вызвать кровотечение.' },
+  stun: { n: 'Оглушение', i: 'g_diamond', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 0, cost: 15, ail: { stun: 35 }, d: '+35% шанс оглушить.' },
+  cooldown: { n: 'Перезарядка', i: 'g_sapphire', req: ['attack', 'spell', 'buff', 'move'], more: 0, cost: 10, mul: { cd: 0.65 }, d: '−35% времени перезарядки.' },
+  overcharge: { n: 'Перегрузка', i: 'g_amethyst', req: ['attack', 'spell'], not: ['minion', 'buff'], more: 50, cost: 100, d: '+50% урона, стоимость навыка удвоена.' },
+  duration: { n: 'Продление', i: 'g_emerald', req: ['buff', 'curse', 'dot', 'trap', 'minion'], more: 0, cost: 15, mul: { dur: 1.6, mdur: 1.6 }, zdur: 1.6, d: '+60% длительности.' },
+  cascade: { n: 'Каскад', i: 'g_amethyst', req: ['aoe'], not: ['proj', 'buff', 'melee', 'trap'], more: -25, cost: 40, set: { cascade: 2 }, d: 'Удар по области повторяется ещё в двух местах рядом. −25% урона.' },
+  mpower: { n: 'Сила слуг', i: 'g_amethyst', req: ['minion'], cost: 30, set: { mmore: 45 }, d: 'Существа этого навыка наносят на 45% больше урона.' },
+  mhorde: { n: 'Многочисленность', i: 'g_emerald', req: ['minion'], cost: 40, add: { max: 2, n1: 1 }, set: { mmore: -15 }, d: '+2 к максимуму существ навыка, −15% их урона.' },
+  mlife: { n: 'Стойкость слуг', i: 'g_sapphire', req: ['minion'], cost: 20, set: { mlife: 80 }, d: 'Существа навыка получают +80% здоровья.' },
+  reach: { n: 'Длинный клинок', i: 'g_topaz', req: ['melee'], more: 0, cost: 15, mul: { rng: 1.35 }, add: { arc: 40 }, d: '+35% дальности и +40° дуги ближних атак.' },
+  multistrike: { n: 'Серия ударов', i: 'g_topaz', req: ['melee'], not: ['move', 'buff'], more: -25, cost: 30, add: { hits: 2 }, d: 'Ближняя атака бьёт ещё дважды. −25% урона.' },
+  traps: { n: 'Минное поле', i: 'g_emerald', req: ['trap'], more: -15, cost: 30, add: { n1: 2, max: 3 }, d: 'Ставит 3 ловушки за раз, −15% урона.' },
+};
+export const SUPPORT_IDS = Object.keys(SUPPORTS);
+export const START_SUPPORTS = ['faster', 'area', 'pierce', 'leech', 'cooldown', 'mpower'];
