@@ -83,7 +83,14 @@ export function starterGear(cls, def) {
 }
 
 // ---- drops
-export function dropAt(x, y, d) { const z = G.zone; if (!z) return; const a = rnd(0, 6.28), r = rnd(0.3, 1.4); z.drops.push({ ...d, x, y, tx: x + Math.cos(a) * r, ty: y + Math.sin(a) * r, t: 0, id: uid() }); }
+export function dropAt(x, y, d) {
+  const z = G.zone; if (!z) return; const m = z.map;
+  const free = (px, py) => { const tx = Math.floor(px), ty = Math.floor(py); return tx >= 0 && ty >= 0 && tx < m.w && ty < m.h && !m.solid[ty * m.w + tx]; };
+  let tx = x, ty = y;
+  for (let k = 0; k < 12; k++) { const a = rnd(0, 6.28), r = rnd(0.3, 1.4); const nx = x + Math.cos(a) * r, ny = y + Math.sin(a) * r; if (free(nx, ny)) { tx = nx; ty = ny; break; } }
+  if (!free(tx, ty)) { tx = Math.floor(x) + 0.5; ty = Math.floor(y) + 0.5; }
+  z.drops.push({ ...d, x, y, tx, ty, t: 0, id: uid() });
+}
 
 export function rollDrops(m, run, p) {
   const z = G.zone, act = ACTIVITIES[run.act], t = run.tier, ilvl = CURVE.ilvl(t);

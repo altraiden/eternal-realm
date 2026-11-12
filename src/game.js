@@ -11,7 +11,7 @@ import { calcStats } from './stats.js';
 import { resolveAll, useSkill, updateCasting } from './skills.js';
 import { tickStatuses, updateProjs, updateAreas, addArea, applyHit, simpleHit, slowMult, text, fx, heal, addBuff } from './combat.js';
 import { mkActor, spawnMob, spawnPack, spawnBoss, updateMob, updateBoss, updateMinion, separate, moveActor } from './actors.js';
-import { genCave, genDungeon, genArena, genHub, updateFlow, walkable } from './world.js';
+import { genCave, genDungeon, genArena, genHub, updateFlow, walkable, safeSpot } from './world.js';
 import { rollDrops, dropAt, addToBag, genItem, vendorStock } from './items.js';
 import { render, initRender, s2w, R } from './render.js';
 import { saveNow } from './save.js';
@@ -59,7 +59,7 @@ export function enterHub() {
   z.heroes = [G.p];
   // other "players" hanging around town
   const pts = map.npcs;
-  for (const b of shuffle(G.save.world.bots.filter((x) => x.online && !(G.party && G.party.ids.includes(x.id)))).slice(0, 12)) {
+  for (const b of shuffle(G.save.world.bots.filter((x) => x.online && !(G.party && G.party.ids.includes(x.id)))).slice(0, 24)) {
     let x = map.start.x, y = map.start.y;
     for (let k = 0; k < 8; k++) { const n = pick(pts), nx = n.x + rnd(-2.5, 2.5), ny = n.y + rnd(0.8, 3); if (walkable(map, nx, ny)) { x = nx; y = ny; break; } }
     z.actors.push(mkActor({ kind: 'npc', team: 2, x, y, name: `${b.ch.name} · ${b.ch.level}`, spr: CLASSES[b.ch.cls].spr, bot: b, sc: 3, r: 0.36, wander: { tx: x, ty: y, wait: rnd(0, 6), stuck: 0 } }));
@@ -236,7 +236,7 @@ function completeRun() {
   for (let i = 0; i < n; i++) dropAt(p.x, p.y, { kind: 'item', item: genItem(CURVE.ilvl(run.tier) + 1, { cls: G.ch.cls, mf: (p.s.mf || 0) + run.rar + 100, minRar: 2 }) });
   for (const id in act.mats) dropAt(p.x, p.y, { kind: 'mat', mid: id, n: 1 + (chance(40) ? 1 : 0) });
   if (run.act === 'rift' && run.t < 150) toast('Быстрая зачистка: бонусная добыча!', '#36e0c8');
-  z.objs.push({ kind: 'portal', x: p.x + 1.5, y: p.y - 1.5, dwell: 0 });
+  { const sp = safeSpot(z.map, p.x, p.y, 2); z.objs.push({ kind: 'portal', x: sp.x, y: sp.y, dwell: 0 }); fx('ring', sp.x, sp.y, { rad: 3, col: '#b06bff', dur: 0.8 }); }
   toast('Испытание пройдено! Портал домой открыт.', '#7be04a');
   saveNow(); bus.emit('zone');
 }
@@ -419,7 +419,7 @@ function update(dt) {
   updateDrops(dt);
   if (z.run) { updateRun(dt); if (G.zone !== z) return; }
   if (z.actors.some((a) => a.dead && a !== p)) { z.actors = z.actors.filter((a) => !a.dead || a === p); z.minions = z.minions.filter((a) => !a.dead); z.bosses = z.bosses.filter((a) => !a.dead); }
-  { const lx = clamp((G.mouse.wx - p.x) * 0.1, -1.4, 1.4), ly = clamp((G.mouse.wy - p.y) * 0.1, -1.4, 1.4), k = Math.min(1, dt * 7); G.cam.x += (p.x + (z.hub || p.dead ? 0 : lx) - G.cam.x) * k; G.cam.y += (p.y + (z.hub || p.dead ? 0 : ly) - G.cam.y) * k; }
+  { const mwx = Number.isFinite(G.mouse.wx) ? G.mouse.wx : p.x, mwy = Number.isFinite(G.mouse.wy) ? G.mouse.wy : p.y, lx = clamp((mwx - p.x) * 0.1, -1.4, 1.4), ly = clamp((mwy - p.y) * 0.1, -1.4, 1.4), k = Math.min(1, dt * 7); G.cam.x += (p.x + (z.hub || p.dead ? 0 : lx) - G.cam.x) * k; G.cam.y += (p.y + (z.hub || p.dead ? 0 : ly) - G.cam.y) * k; if (!Number.isFinite(G.cam.x + G.cam.y)) { G.cam.x = p.x; G.cam.y = p.y; } }
   seenT -= dt;
   if (seenT <= 0 && !z.hub) { seenT = 0.2; const m = z.map, px = Math.floor(p.x), py = Math.floor(p.y); for (let j = -12; j <= 12; j++) for (let i = -12; i <= 12; i++) { const x = px + i, y = py + j; if (x >= 0 && y >= 0 && x < m.w && y < m.h && i * i + j * j < 150) m.seen[y * m.w + x] = 1; } }
   const w = G.dps.win; while (w.length && w[0][0] < G.time - 4) w.shift();

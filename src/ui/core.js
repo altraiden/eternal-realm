@@ -5,7 +5,7 @@ import { iconHTML } from '../gfx.js';
 import { RAR, SLOT_NAME, statLine } from '../data/defs.js';
 import { BASES, UNIQUES } from '../data/items.js';
 import { itemInfo } from '../stats.js';
-import { sellValue, itemSprite, slotFor } from '../items.js';
+import { sellValue, itemSprite, slotFor, itemScore } from '../items.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const UI = { panel: null, arg: null, sel: null };
@@ -41,8 +41,9 @@ export function cellHTML(it, ref, extra = '') {
 }
 export function itemTip(it, hd) {
   const B = BASES[it.base], info = itemInfo(it), R = RAR[it.rar];
-  let h = `<div class="tip">${hd ? `<div class="hd">${hd}</div>` : ''}<div class="nm" style="color:${R.c}">${it.name}${it.up ? ' +' + it.up : ''}</div>`;
-  h += `<div class="dim">${R.n} · ${B.n} · ${SLOT_NAME[B.s]}${B.h === 2 ? ' (двуручное)' : ''}</div><div class="dim small">Уровень предмета ${it.ilvl}${it.q ? ` · качество +${it.q * 2}%` : ''}</div>`;
+  const [spr, v] = itemSprite(it);
+  let h = `<div class="tip itip r${it.rar}" style="--rc:${R.c}">${hd ? `<div class="hd">${hd}</div>` : ''}<div class="ihead"><div class="cell r${it.rar}">${iconHTML(spr, v, 40)}</div><div><div class="nm" style="color:${R.c}">${it.name}${it.up ? ' +' + it.up : ''}</div>`;
+  h += `<div class="small" style="color:${R.c};opacity:.8">${R.n} · ${B.n}</div><div class="dim small">${SLOT_NAME[B.s]}${B.h === 2 ? ' (двуручное)' : ''} · ур. ${it.ilvl}${it.q ? ` · качество +${it.q * 2}%` : ''}</div></div></div>`;
   if (info.wpn) { const w = info.wpn; h += `<div class="sep"></div><div>Урон: <b>${w.min}–${w.max}</b></div><div>Атак в секунду: ${w.aps} · крит ${w.crit}%</div><div class="gold">УВС: ${Math.round(((w.min + w.max) / 2) * w.aps)}</div>`; }
   const dn = { armor: 'Броня', evasion: 'Уклонение', mana: 'Мана', block: 'Блок %' };
   if (Object.keys(info.def).length) { h += '<div class="sep"></div>'; for (const k in info.def) h += `<div>${dn[k]}: <b>${info.def[k]}</b></div>`; }
@@ -53,9 +54,25 @@ export function itemTip(it, hd) {
   h += `<div class="sep"></div><div class="dim small">Цена продажи: ${sellValue(it)} зол.</div></div>`;
   return h;
 }
+// Stat-by-stat difference if the item replaced the equipped one.
+function deltaHTML(it, eq) {
+  const a = itemInfo(it), b = eq ? itemInfo(eq) : { mods: [], wpn: null }, d = {};
+  for (const [k, v] of a.mods) d[k] = (d[k] || 0) + v;
+  for (const [k, v] of b.mods) d[k] = (d[k] || 0) - v;
+  const rows = [];
+  const dps = (w) => (w ? ((w.min + w.max) / 2) * w.aps : 0);
+  if (a.wpn || b.wpn) { const x = dps(a.wpn) - dps(b.wpn); if (Math.abs(x) >= 0.5) rows.push([x, `${x > 0 ? '+' : ''}${Math.round(x)} УВС оружия`]); }
+  for (const k in d) { const x = d[k]; if (Math.abs(x) < 0.05) continue; rows.push([x, statLine(k, x)]); }
+  if (!rows.length) return '';
+  const sa = itemScore(it, G.ch.cls), sb = eq ? itemScore(eq, G.ch.cls) : 0, pct = sb > 0 ? Math.round(((sa - sb) / sb) * 100) : null;
+  return `<div class="sep"></div><div class="hd">Если надеть${pct != null ? ` · <span class="${pct >= 0 ? 'good' : 'bad'}">${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct)}%</span>` : ''}</div>` +
+    rows.slice(0, 12).map(([x, t]) => `<div class="small ${x > 0 ? 'good' : 'bad'}">${x > 0 ? '▲' : '▼'} ${t}</div>`).join('');
+}
 export function itemTipCompare(it, ref) {
-  let h = itemTip(it);
-  if (ref && !ref.startsWith('eq:') && !ref.startsWith('bot:')) { const eq = G.ch.equip[slotFor(G.ch, it)]; if (eq && eq !== it) h += itemTip(eq, 'Надето'); }
+  if (!ref || ref.startsWith('eq:') || ref.startsWith('bot:') || !G.ch) return itemTip(it);
+  const eq = G.ch.equip[slotFor(G.ch, it)];
+  let h = itemTip(it); if (eq !== it) h = h.replace(/<\/div>$/, deltaHTML(it, eq) + '</div>');
+  if (eq && eq !== it) h += itemTip(eq, 'Надето');
   return h;
 }
 export const matHTML = (id, n, MATS) => `<div class="mat" data-tip="${MATS[id].n}: ${MATS[id].d}">${iconHTML(MATS[id].i, 0, 20)}<span>${fmt(n)}</span></div>`;
@@ -67,12 +84,14 @@ export function openPanel(name, arg) {
   refresh();
 }
 export function closePanel() { UI.panel = null; UI.sel = null; G.paused = false; const p = $('#panels'); p.classList.remove('open'); p.innerHTML = ''; hideTip(); }
+const TABS = [['inv', 'Персонаж', 'I'], ['skills', 'Навыки', 'K'], ['tree', 'Таланты', 'P'], ['lfg', 'Группы', 'G'], ['ladder', 'Рейтинги', 'L'], ['guild', 'Гильдия', ''], ['dm', 'Письма', '']];
 export function refresh() {
   if (!UI.panel) return;
   const def = PANELS[UI.panel], root = $('#panels');
   const keep = [...root.querySelectorAll('.scroll')].map((e) => e.scrollTop);
   root.classList.add('open');
-  root.innerHTML = `<div class="panel" style="${def.style || ''}"><header><h2>${typeof def.title === 'function' ? def.title(UI.arg) : def.title}</h2>${def.head ? def.head(UI.arg) : ''}<button data-a="close">✕</button></header><div class="body">${def.render(UI.arg)}</div></div>`;
+  const tabs = TABS.some((t) => t[0] === UI.panel) ? `<nav class="ptabs">${TABS.map(([n, l, k]) => `<button data-tab="${n}" class="${n === UI.panel ? 'on' : ''}">${l}${k ? `<span class="hk">${k}</span>` : ''}</button>`).join('')}</nav>` : '';
+  root.innerHTML = `<div class="panel pn-${UI.panel}" style="${def.style || ''}">${tabs}<header><h2>${typeof def.title === 'function' ? def.title(UI.arg) : def.title}</h2>${def.head ? def.head(UI.arg) : ''}<button data-a="close" class="xbtn" data-tip="Закрыть (Esc)">✕</button></header><div class="body">${def.render(UI.arg)}</div></div>`;
   root.querySelectorAll('.scroll').forEach((e, i) => { if (keep[i]) e.scrollTop = keep[i]; });
   if (def.after) def.after(root, UI.arg);
 }
@@ -80,6 +99,7 @@ export function initUICore() {
   const root = $('#panels');
   root.addEventListener('mousedown', (e) => { if (e.target === root) closePanel(); });
   const handle = (e, right) => {
+    const tb = e.target.closest('[data-tab]'); if (tb && !right) { openPanel(tb.dataset.tab, tb.dataset.tab === 'skills' ? { slot: 0 } : {}); return; }
     const t = e.target.closest('[data-a],[data-it],[data-slot]'); if (!t) return;
     if (right) e.preventDefault();
     if (t.dataset.a === 'close') return closePanel();

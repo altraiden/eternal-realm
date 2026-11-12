@@ -17,13 +17,18 @@ import { refreshStats, openPortal, describeRun, leaveRun, enterHub, toast } from
 import { saveNow, exportSave, importSave, newChar } from '../save.js';
 import { $, UI, definePanel, openPanel, closePanel, refresh, cellHTML, getItem, itemTip, matHTML } from './core.js';
 import { buildHud, rebuildBar } from './hud.js';
+import { playerPower } from '../bots.js';
 
+const TAGN = { aoe: 'область', attack: 'атака', bow: 'лук', buff: 'усиление', chain: 'цепь', cold: 'холод', curse: 'проклятие', dark: 'тьма', dot: 'урон со временем', fire: 'огонь', heal: 'лечение', holy: 'свет', light: 'молния', melee: 'ближний бой', minion: 'существа', move: 'перемещение', phys: 'физический', poison: 'яд', proj: 'снаряд', spell: 'заклинание', taunt: 'провокация', trap: 'ловушка' };
+const TAGC = { fire: '#ff8a50', cold: '#7ac8ff', light: '#ffe060', poison: '#8be05a', dark: '#b07aff', holy: '#ffe6a0', phys: '#d8c8b0' };
+const tagsHTML = (arr) => arr.map((t) => `<span class="tg" style="${TAGC[t] ? 'color:' + TAGC[t] : ''}">${TAGN[t] || t}</span>`).join('');
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const changed = () => { refreshStats(true); saveNow(); };
 
+const sortItems = (arr) => { const n = arr.length, it = arr.filter(Boolean).sort((a, b) => b.rar - a.rar || BASES[a.base].s.localeCompare(BASES[b.base].s) || b.ilvl - a.ilvl); return it.concat(new Array(n - it.length).fill(null)); };
 function bagHTML(hint) {
-  const ch = G.ch;
-  return `<div class="col" style="width:500px"><div class="row"><h3 class="grow" style="margin:0">Сумка</h3><span class="gold">${fmt(ch.gold)} зол.</span></div>
+  const ch = G.ch, used = ch.bag.filter(Boolean).length;
+  return `<div class="col" style="width:500px"><div class="row"><h3 class="grow" style="margin:0">Сумка <span class="dim small">${used}/${ch.bag.length}</span></h3><button class="small" data-a="sortBag" data-tip="Упорядочить по редкости и типу">⇅ Сортировать</button><span class="goldchip">${iconHTML('u_coin', 0, 16)} ${fmt(ch.gold)}</span></div>
   <div class="grid" style="grid-template-columns:repeat(10,46px)">${ch.bag.map((it, i) => cellHTML(it, 'bag:' + i)).join('')}</div>
   <div class="row wrap">${Object.keys(MATS).map((id) => matHTML(id, ch.mats[id] || 0, MATS)).join('')}</div>
   <div class="dim small">${hint}</div></div>`;
@@ -38,18 +43,21 @@ definePanel('inv', {
     const S = (n, v, tip) => `<div class="stat"${tip ? ` data-tip="${esc(tip)}"` : ''}><span>${n}</span><b>${v}</b></div>`;
     const res = ['fire', 'cold', 'light', 'poison', 'dark'].map((t) => `${DTN[t]} ${Math.min(75, Math.round((s['res_' + t] || 0) + (s.res_all || 0)))}%`).join(' · ');
     const rarOpt = (cur) => RAR.map((r, i) => `<option value="${i}"${i === cur ? ' selected' : ''}>${r.n}</option>`).join('');
-    return `<div class="col" style="width:350px">
-      <div class="grid" style="grid-template-columns:repeat(3,46px);justify-content:center;gap:6px 30px">${SLOTS.map(([slot, name]) => cellHTML(ch.equip[slot], 'eq:' + slot, `<span class="ph">${name}</span>`)).join('')}</div>
-      <h3>Характеристики ${ch.attrPts ? `<span class="good small">(свободно: ${ch.attrPts})</span>` : ''}</h3>
+    const SN = Object.fromEntries(SLOTS), eqc = (sl) => cellHTML(ch.equip[sl], 'eq:' + sl, `<span class="ph">${SN[sl]}</span>`), cls = CLASSES[ch.cls];
+    return `<div class="col" style="width:370px">
+      <div class="doll"><div class="doll-col">${['helm', 'chest', 'gloves', 'boots', 'belt'].map(eqc).join('')}</div>
+        <div class="doll-mid"><div class="doll-port">${iconHTML(cls.spr, 0, 96)}</div><div class="doll-nm">${esc(ch.name)}</div><div class="dim small">${cls.n} · ур. ${ch.level}</div><div class="doll-pow" data-tip="Сила экипировки — по ней строятся рейтинги и подбор групп"><span class="dim small">Сила</span> ${fmt(playerPower())}</div><div class="row" style="justify-content:center;gap:6px">${eqc('mainhand')}${eqc('offhand')}</div></div>
+        <div class="doll-col">${['amulet', 'ring1', 'ring2', 'relic', 'artifact'].map(eqc).join('')}</div></div>
+      <h3>Характеристики ${ch.attrPts ? `<span class="good small">(свободно: ${ch.attrPts}, Shift — по 5)</span>` : ''}</h3>
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:2px 14px">${ATTRS.map(([a, n]) => `<div class="stat"><span>${n}</span><b>${Math.round(s[a.toUpperCase()])} ${ch.attrPts ? `<button data-a="attr" data-k="${a}" style="padding:0 6px">+</button>` : ''}</b></div>`).join('')}</div>
-      <div class="scroll" style="max-height:250px;padding-right:6px">
-      ${S('Здоровье', s.maxLife)}${S('Мана', s.maxMana)}${S('Восст. здоровья/сек', s.regen.toFixed(1))}${S('Восст. маны/сек', s.manaRegen.toFixed(1))}
+      <div class="scroll statbox" style="max-height:230px;padding-right:6px">
+      <div class="sh">Защита</div>${S('Здоровье', s.maxLife)}${S('Мана', s.maxMana)}${S('Восст. здоровья/сек', s.regen.toFixed(1))}${S('Восст. маны/сек', s.manaRegen.toFixed(1))}
       ${S('Броня', Math.round(s.armorF), `Снижает физический урон примерно на ${ds.physRed}% на вашем текущем уровне контента`)}${S('Уклонение', Math.round(s.evasionF), `Шанс уклониться около ${ds.eva}%`)}${S('Блок', Math.round(s.blockF) + '%')}${S('Снижение урона', Math.min(60, Math.round(s.dr || 0)) + '%')}
       ${S('Сопротивления', '', res)}<div class="small dim">${res}</div>
-      ${S('Урон оружия', `${s.wpn.min}–${s.wpn.max}`)}${S('Шанс крита', '+' + (s.crit || 0).toFixed(1) + '% / ×' + (1 + (s.crit_inc || 0) / 100).toFixed(2))}${S('Крит. множитель', 150 + Math.round(s.critMulti || 0) + '%')}
+      <div class="sh">Нападение</div>${S('Урон оружия', `${s.wpn.min}–${s.wpn.max}`)}${S('Шанс крита', '+' + (s.crit || 0).toFixed(1) + '% / ×' + (1 + (s.crit_inc || 0) / 100).toFixed(2))}${S('Крит. множитель', 150 + Math.round(s.critMulti || 0) + '%')}
       ${S('Скорость атаки', '+' + Math.round(s.atkSpeed_inc || 0) + '%')}${S('Скорость заклинаний', '+' + Math.round(s.castSpeed_inc || 0) + '%')}${S('Скорость бега', s.moveSpeed.toFixed(1))}
       ${S('Урон: атаки / заклинания', `+${Math.round((s.attack_inc || 0) + (s.dmg_inc || 0))}% / +${Math.round((s.spell_inc || 0) + (s.dmg_inc || 0))}%`)}${S('Урон существ', '+' + Math.round(s.minion_inc || 0) + '%')}
-      ${S('Вампиризм', (s.leechF || 0).toFixed(1) + '%')}${S('Перезарядка', '+' + Math.round(s.cdr || 0) + '%')}${S('Редкость / золото', `+${Math.round(s.mf || 0)}% / +${Math.round(s.gf || 0)}%`)}
+      <div class="sh">Прочее</div>${S('Вампиризм', (s.leechF || 0).toFixed(1) + '%')}${S('Перезарядка', '+' + Math.round(s.cdr || 0) + '%')}${S('Редкость / золото', `+${Math.round(s.mf || 0)}% / +${Math.round(s.gf || 0)}%`)}
       </div>
       ${ch.level >= 100 ? `<h3>Парагон <span class="good small">(очков: ${ch.pgPts || 0})</span></h3><div class="row wrap">${[['dmg', '+1% урона'], ['life', '+0.5% здоровья'], ['mf', '+1% редкости'], ['res', '+0.3% сопр.']].map(([k, n]) => `<button data-a="pg" data-k="${k}" ${!ch.pgPts || (ch.paragon[k] || 0) >= 50 ? 'disabled' : ''}>${n} (${ch.paragon[k] || 0}/50)</button>`).join('')}</div>` : ''}
     </div>
@@ -73,6 +81,7 @@ definePanel('inv', {
       changed();
     } else if (d.a === 'attr') { const n = e.shiftKey ? Math.min(5, ch.attrPts) : 1; ch.attrs[d.k] += n; ch.attrPts -= n; changed(); }
     else if (d.a === 'pg') { ch.paragon[d.k] = (ch.paragon[d.k] || 0) + 1; ch.pgPts--; changed(); }
+    else if (d.a === 'sortBag') { ch.bag = sortItems(ch.bag); saveNow(); }
     else if (d.a === 'salvAll') {
       const max = +$('#salv').value; let n = 0, dust = 0;
       ch.bag.forEach((it, i) => { if (it && it.rar <= max && !it.uniq) { dust += salvage(ch, it).dust; ch.bag[i] = null; n++; } });
@@ -91,7 +100,7 @@ definePanel('skills', {
     if (id) {
       const sk = resolveSkill(p, id), def = SKILLS[id], socks = maxSockets(ch.level), sups = ch.skills.sup[id] || [], dps = skillDps(p, sk);
       h += `<h3>${def.n} <span class="dim small">ур. ${sk.lvl} · ${CLASSES[def.c].n}${def.c === ch.cls ? ' (+2 за свой класс)' : ''}</span></h3><div>${def.desc}</div>
-      <div class="dim small">Теги: ${sk.tags.join(', ')}</div>
+      <div class="tgs">${tagsHTML(sk.tags)}</div>
       <div class="stat"><span>Стоимость</span><b>${sk.cost} ${p.s.ks_blood ? 'здоровья' : 'маны'}</b></div><div class="stat"><span>Перезарядка</span><b>${sk.cd ? sk.cd.toFixed(1) + ' сек.' : 'нет'}</b></div><div class="stat"><span>Время применения</span><b>${(sk.wind + sk.rec).toFixed(2)} сек.</b></div>${dps ? `<div class="stat"><span>Расчётный урон в секунду (по одной цели)</span><b class="gold">${fmt(dps)}</b></div>` : ''}
       <h3>Руны навыка <span class="dim small">(${socks} ячейки; больше на 80 и 95 уровне)</span></h3><div class="row">${Array.from({ length: socks }, (_, i) => `<div class="sock" data-a="sock" data-k="${i}" style="${arg.sock === i ? 'border-color:#fff;border-style:solid' : ''}" ${sups[i] ? `data-tip="${esc(SUPPORTS[sups[i]].n + ': ' + SUPPORTS[sups[i]].d)}"` : 'data-tip="Пустая ячейка — нажмите, чтобы выбрать руну"'}>${sups[i] ? iconHTML(SUPPORTS[sups[i]].i, 0, 28) : ''}</div>`).join('')}</div>`;
       if (arg.sock != null) {
@@ -99,16 +108,23 @@ definePanel('skills', {
         h += `<div class="list scroll" style="max-height:230px">${sups[arg.sock] ? '<div class="skillrow" data-a="sup" data-k="">— убрать руну —</div>' : ''}${ok.map((s) => `<div class="skillrow" data-a="sup" data-k="${s}">${iconHTML(SUPPORTS[s].i, 0, 24)}<div><b>${SUPPORTS[s].n}</b><div class="dim small">${SUPPORTS[s].d}</div></div></div>`).join('') || '<div class="dim">Нет подходящих изученных рун. Новые выпадают с монстров и продаются у Мастера рун.</div>'}</div>`;
       }
     } else h += '<div class="dim">Ячейка пуста — выберите навык справа.</div>';
-    h += '</div><div class="scroll" style="width:560px;max-height:70vh;padding-right:6px">';
+    const q = (arg.q || '').toLowerCase(), fc = arg.fc || 'all';
+    h += `</div><div class="col" style="width:580px"><div class="row wrap" style="gap:4px"><input id="skq" placeholder="Поиск: «огонь», «снаряд», «вихрь»…" value="${esc(arg.q || '')}" style="flex:1;min-width:180px" /><button class="small${fc === 'all' ? ' on' : ''}" data-a="fc" data-k="all">Все</button><button class="small${fc === 'mine' ? ' on' : ''}" data-a="fc" data-k="mine">Мой класс</button></div><div class="scroll" style="max-height:64vh;padding-right:6px">`;
+    let any = 0;
     for (const c of [ch.cls, ...CLASS_IDS.filter((x) => x !== ch.cls)]) {
-      h += `<h3>${CLASSES[c].n}</h3><div class="grid" style="grid-template-columns:1fr 1fr">`;
-      for (const s in SKILLS) if (SKILLS[s].c === c) h += `<div class="skillrow${ch.skills.bar.includes(s) ? ' on' : ''}" data-a="skill" data-k="${s}" data-tip="${esc(SKILLS[s].desc)}">${iconHTML(SKILLS[s].i, 0, 32)}<div><div>${SKILLS[s].n}</div><div class="dim small">${SKILLS[s].tg}</div></div></div>`;
+      if (fc === 'mine' && c !== ch.cls) continue;
+      const list = Object.keys(SKILLS).filter((s) => SKILLS[s].c === c && (!q || (SKILLS[s].n + ' ' + SKILLS[s].desc + ' ' + SKILLS[s].tg.split(' ').map((t) => TAGN[t] || t).join(' ')).toLowerCase().includes(q)));
+      if (!list.length) continue; any++;
+      h += `<h3>${CLASSES[c].n}${c === ch.cls ? ' <span class="good small">+2 к уровню навыков</span>' : ''}</h3><div class="grid" style="grid-template-columns:1fr 1fr">`;
+      for (const s of list) h += `<div class="skillrow${ch.skills.bar.includes(s) ? ' on' : ''}" data-a="skill" data-k="${s}" data-tip="${esc('<b class=gold>' + SKILLS[s].n + '</b><br>' + SKILLS[s].desc)}">${iconHTML(SKILLS[s].i, 0, 32)}<div style="min-width:0"><div>${SKILLS[s].n}</div><div class="tgs">${tagsHTML(SKILLS[s].tg.split(' ').slice(0, 4))}</div></div></div>`;
       h += '</div>';
     }
-    return h + '</div>';
+    return h + (any ? '' : '<div class="dim">Ничего не найдено.</div>') + '</div></div>';
   },
+  after(root) { const i = $('#skq', root); if (!i) return; i.onkeydown = (e) => e.stopPropagation(); i.onkeyup = (e) => e.stopPropagation(); i.oninput = () => { UI.arg.q = i.value; const pos = i.selectionStart; refresh(); const j = $('#skq'); j.focus(); j.setSelectionRange(pos, pos); }; },
   act(d) {
     const ch = G.ch, arg = UI.arg, sel = arg.slot ?? 0, id = ch.skills.bar[sel];
+    if (d.a === 'fc') { arg.fc = d.k; return; }
     if (d.a === 'slot') { arg.slot = +d.k; arg.sock = null; }
     else if (d.a === 'skill') { const j = ch.skills.bar.indexOf(d.k); if (j >= 0) ch.skills.bar[j] = id; ch.skills.bar[sel] = d.k; arg.sock = null; changed(); rebuildBar(); }
     else if (d.a === 'sock') arg.sock = arg.sock === +d.k ? null : +d.k;
@@ -178,7 +194,7 @@ definePanel('craft', {
     if (d.it && d.it.startsWith('bag:')) {
       if (right) { const k = d.it.split(':')[1], it = ch.bag[k]; if (it.rar >= 3 && !confirm(`Разобрать «${it.name}»?`)) return false; const r = salvage(ch, it); ch.bag[k] = null; if (UI.sel === d.it) UI.sel = null; toast(`+${r.dust} пыли`); saveNow(); }
       else UI.sel = d.it;
-    } else if (d.a === 'op') { const r = doCraft(ch, d.k, getItem(UI.sel)); toast(r.msg, r.ok ? '#7be04a' : '#f88'); if (r.ok) changed(); }
+    } else if (d.a === 'sortBag') { ch.bag = sortItems(ch.bag); UI.sel = null; saveNow(); } else if (d.a === 'op') { const r = doCraft(ch, d.k, getItem(UI.sel)); toast(r.msg, r.ok ? '#7be04a' : '#f88'); if (r.ok) changed(); }
   },
 });
 
@@ -198,7 +214,7 @@ definePanel('vendor', {
       if (src === 'vend') { const it = G.vendor[k], pr = buyPrice(it); if (ch.gold < pr) { toast(`Нужно ${pr} золота`, '#f88'); return false; } if (addToBag(ch, it) < 0) { toast('Сумка полна', '#f88'); return false; } ch.gold -= pr; G.vendor[k] = null; }
       else if (src === 'bag') { const it = ch.bag[k]; if (it.rar >= 4 && !confirm(`Продать «${it.name}» за ${sellValue(it)} зол.?`)) return false; ch.gold += sellValue(it); ch.bag[k] = null; }
       saveNow();
-    } else if (d.a === 'gamble') {
+    } else if (d.a === 'sortBag') { ch.bag = sortItems(ch.bag); saveNow(); } else if (d.a === 'gamble') {
       const ilvl = CURVE.ilvl(Math.max(...Object.values(ch.prog.tier))), pr = gamblePrice(ilvl);
       if (ch.gold < pr) { toast(`Нужно ${pr} золота`, '#f88'); return false; }
       const it = genItem(ilvl, { slot: d.k, cls: ch.cls, mf: 60 + (G.p.s.mf || 0) }); if (addToBag(ch, it) < 0) { toast('Сумка полна', '#f88'); return false; }
@@ -210,8 +226,10 @@ definePanel('vendor', {
 // ------------------------------------------------------------ stash
 definePanel('stash', {
   title: 'Хранилище (общее для всех персонажей)', style: 'width:1260px',
-  render() { return `<div class="grid" style="grid-template-columns:repeat(15,46px);align-content:start">${G.save.stash.map((it, i) => cellHTML(it, 'stash:' + i)).join('')}</div>${bagHTML('ЛКМ — переложить предмет в хранилище и обратно')}`; },
+  render() { const n = G.save.stash.filter(Boolean).length; return `<div class="col"><div class="row"><h3 class="grow" style="margin:0">Хранилище <span class="dim small">${n}/${G.save.stash.length}</span></h3><button class="small" data-a="sortStash">⇅ Сортировать</button></div><div class="grid" style="grid-template-columns:repeat(15,46px);align-content:start">${G.save.stash.map((it, i) => cellHTML(it, 'stash:' + i)).join('')}</div></div>${bagHTML('ЛКМ — переложить предмет в хранилище и обратно')}`; },
   act(d) {
+    if (d.a === 'sortStash') { G.save.stash = sortItems(G.save.stash); saveNow(); return; }
+    if (d.a === 'sortBag') { G.ch.bag = sortItems(G.ch.bag); saveNow(); return; }
     if (!d.it) return false; const ch = G.ch, [src, k] = d.it.split(':'), st = G.save.stash;
     if (src === 'bag') { const i = st.findIndex((x) => !x); if (i < 0 || i >= STASH_SIZE) { toast('Хранилище заполнено', '#f88'); return false; } st[i] = ch.bag[k]; ch.bag[k] = null; }
     else if (src === 'stash') { if (addToBag(ch, st[k]) < 0) { toast('Сумка полна', '#f88'); return false; } st[k] = null; }
@@ -283,18 +301,34 @@ definePanel('board', {
 
 // ------------------------------------------------------------ menu
 definePanel('menu', {
-  title: 'Меню', style: 'width:420px',
+  title: 'Меню', style: 'width:860px',
   render() {
     const st = G.save.settings, run = G.zone && G.zone.run;
-    return `<div class="col grow"><button class="big" data-a="close">Продолжить</button>${run ? '<button data-a="hub">Вернуться в город (покинуть вылазку)</button>' : ''}
-    <button data-a="chars">Сменить персонажа</button><button data-a="dps">Счётчик урона: ${st.dps ? 'вкл.' : 'выкл.'}</button><button data-a="gfx">Графика: ${st.gfx === '2d' ? '2D (лёгкая)' : '3D · ' + (G.gfx || '')} — сменить</button>
-    <h3>Сохранение</h3><div class="row"><button data-a="exp">Экспорт в буфер</button><button data-a="imp">Импорт</button></div><div class="dim small">Игра сохраняется автоматически в этом браузере. Колесо мыши — масштаб.</div></div>`;
+    const opt = (k, vals, cur) => `<div class="seg">${vals.map(([v, n]) => `<button data-a="set" data-k="${k}" data-v="${v}" class="${String(cur) === String(v) ? 'on' : ''}">${n}</button>`).join('')}</div>`;
+    const row = (n, ctl, d) => `<div class="setrow"><div><div>${n}</div>${d ? `<div class="dim small">${d}</div>` : ''}</div>${ctl}</div>`;
+    const KB = [['WASD', 'движение'], ['ЛКМ / ПКМ', 'основные навыки'], ['Q E R F', 'навыки'], ['Пробел', 'перекат'], ['1', 'зелье'], ['T', 'портал домой'], ['E', 'говорить с жителем'], ['I / C', 'персонаж'], ['K', 'навыки'], ['P', 'таланты'], ['G', 'группы'], ['L', 'рейтинги'], ['Enter', 'чат'], ['Колесо', 'масштаб'], ['Esc', 'меню / закрыть']];
+    return `<div class="col" style="width:250px"><button class="big" data-a="close">Продолжить</button>${run ? '<button data-a="hub">Вернуться в город</button>' : ''}<button data-a="chars">Сменить героя</button>
+      <h3>Сохранение</h3><button data-a="exp">Экспорт в буфер</button><button data-a="imp">Импорт строки</button><div class="dim small">Игра сохраняется автоматически в этом браузере, мир ботов — в IndexedDB.</div></div>
+    <div class="col grow"><h3 style="margin-top:0">Графика</h3>
+      ${row('Отрисовка', opt('gfx', [['3d', '3D'], ['2d', '2D (лёгкая)']], st.gfx === '2d' ? '2d' : '3d'), st.gfx === '2d' ? 'Перезапуск при смене' : 'Сейчас: ' + (G.gfx || '—') + ' · перезапуск при смене')}
+      ${row('Эффекты и частицы', opt('fx', [[0, 'Мало'], [1, 'Средне'], [2, 'Много']], st.fx ?? 2), 'Меньше частиц — выше частота кадров')}
+      ${row('Свечение (bloom)', opt('bloom', [[1, 'Вкл.'], [0, 'Выкл.']], st.bloom ?? 1), 'Перезапуск при смене')}
+      ${row('Тряска камеры', opt('shake', [[1, 'Вкл.'], [0.5, 'Слабо'], [0, 'Выкл.']], st.shake ?? 1))}
+      ${row('Масштаб', `<input type="range" id="zoomr" min="0.7" max="1.5" step="0.05" value="${st.zoom}" style="width:170px" />`, 'Также колесом мыши')}
+      <h3>Интерфейс</h3>
+      ${row('Счётчик урона', opt('dps', [[1, 'Вкл.'], [0, 'Выкл.']], st.dps ? 1 : 0))}
+      ${row('Чат', opt('chat', [[1, 'Показывать'], [0, 'Скрыть']], st.chat ?? 1))}
+      <h3>Управление</h3><div class="kb">${KB.map(([k, n]) => `<div><b class="key">${k}</b><span>${n}</span></div>`).join('')}</div></div>`;
   },
+  after(root) { const z = $('#zoomr', root); if (z) z.oninput = () => { G.save.settings.zoom = +z.value; saveNow(); }; },
   act(d) {
     if (d.a === 'hub') { closePanel(); leaveRun(); return false; }
     if (d.a === 'chars') { saveNow(); closePanel(); showTitle(); return false; }
-    if (d.a === 'gfx') { G.save.settings.gfx = G.save.settings.gfx === '2d' ? '3d' : '2d'; saveNow(); location.reload(); return false; }
-    if (d.a === 'dps') { G.save.settings.dps = !G.save.settings.dps; saveNow(); }
+    if (d.a === 'set') {
+      const st = G.save.settings, v = isNaN(+d.v) ? d.v : +d.v;
+      if (d.k === 'gfx' || d.k === 'bloom') { if (String(st[d.k] ?? (d.k === 'bloom' ? 1 : '3d')) === String(v)) return false; st[d.k] = v; saveNow(); location.reload(); return false; }
+      st[d.k] = d.k === 'dps' ? !!v : v; saveNow(); bus.emit('settings');
+    }
     if (d.a === 'exp') { const s = exportSave(); (navigator.clipboard ? navigator.clipboard.writeText(s) : Promise.reject()).then(() => toast('Сохранение скопировано в буфер обмена'), () => prompt('Скопируйте строку сохранения:', s)); return false; }
     if (d.a === 'imp') { const s = prompt('Вставьте строку сохранения:'); if (s) { if (importSave(s)) { closePanel(); showTitle(); toast('Сохранение загружено'); } else toast('Строка повреждена', '#f88'); } return false; }
   },

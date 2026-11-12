@@ -96,7 +96,7 @@ export function render(dt) {
   if (!z) { ctx.fillStyle = '#07060a'; ctx.fillRect(0, 0, W, H); return; }
   const map = z.map, b = biomeOf(map.biome), tl = tilesFor(map.biome), zm = zoomNow(), c = G.cam;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = b.void; ctx.fillRect(0, 0, W, H);
-  const shx = c.shake > 0.2 ? (Math.random() - 0.5) * c.shake : 0, shy = c.shake > 0.2 ? (Math.random() - 0.5) * c.shake : 0;
+  const shk = c.shake * (G.save.settings.shake ?? 1), shx = shk > 0.2 ? (Math.random() - 0.5) * shk : 0, shy = shk > 0.2 ? (Math.random() - 0.5) * shk : 0;
   const [cix, ciy] = iso(c.x, c.y);
   ctx.setTransform(zm, 0, 0, zm, Math.round(W / 2 - cix * zm + shx), Math.round(H / 2 - ciy * zm + shy));
   // visible range

@@ -30,6 +30,17 @@ export function bfs(m, sx, sy, maxD = 1e9, out = null) {
   return d;
 }
 export function updateFlow(m, px, py) { bfs(m, px, py, 34, m.flow); }
+// Nearest reachable open tile (all 8 neighbours walkable) around a point, preferring distance ~want tiles.
+export function safeSpot(m, x, y, want = 2) {
+  const d = bfs(m, x, y, 14); let best = null, bs = 1e9;
+  for (let ty = 1; ty < m.h - 1; ty++) for (let tx = 1; tx < m.w - 1; tx++) {
+    const k = d[ty * m.w + tx]; if (k > 14) continue;
+    let ok = true; for (let j = -1; j <= 1 && ok; j++) for (let i = -1; i <= 1; i++) if (m.solid[(ty + j) * m.w + tx + i]) { ok = false; break; }
+    if (!ok) continue; const sc = Math.abs(k - want) + (k === 0 ? 3 : 0);
+    if (sc < bs) { bs = sc; best = { x: tx + 0.5, y: ty + 0.5 }; }
+  }
+  return best || { x, y };
+}
 
 function openArea(m, x, y, rad) {
   for (let j = -rad; j <= rad; j++) for (let i = -rad; i <= rad; i++) if (!isFloor(m, x + i, y + j)) return false;

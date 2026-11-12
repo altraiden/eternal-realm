@@ -22,17 +22,33 @@ export function loadSave() {
   for (const k in b.settings) if (G.save.settings[k] === undefined) G.save.settings[k] = b.settings[k];
   return G.save;
 }
+// The living world (hundreds of bots, auction, guilds, messages) is too big for localStorage: it lives in IndexedDB.
+let db = null, lastWorld = 0;
+const openDb = () => new Promise((res, rej) => { const r = indexedDB.open('eternal_realm', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+export async function loadWorld() {
+  try { db = await openDb(); const w = await new Promise((res) => { const q = db.transaction('kv').objectStore('kv').get('world'); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); if (w) G.save.world = w; }
+  catch (e) { console.warn('IndexedDB недоступна, мир ботов не будет сохраняться', e); }
+}
+export function saveWorld(force) {
+  if (!db || !G.save || !G.save.world || (!force && Date.now() - lastWorld < 15000)) return;
+  lastWorld = Date.now();
+  try { db.transaction('kv', 'readwrite').objectStore('kv').put(G.save.world, 'world'); } catch (e) { console.warn('world save failed', e); }
+}
 export function saveNow() {
   if (!G.save) return;
+  const world = G.save.world;
   try {
+    G.save.world = undefined;
     const d = JSON.stringify(G.save), prev = localStorage.getItem(KEY);
+    G.save.world = world;
     if (prev && decode(prev)) localStorage.setItem(KEY + '_bak', prev);
     localStorage.setItem(KEY, JSON.stringify({ d, h: hashStr(d), t: Date.now() }));
-  } catch (e) { console.error('save failed', e); }
+  } catch (e) { G.save.world = world; console.error('save failed', e); }
+  saveWorld();
 }
-export function exportSave() { const d = JSON.stringify(G.save); return btoa(unescape(encodeURIComponent(JSON.stringify({ d, h: hashStr(d) })))); }
+export function exportSave() { const d = JSON.stringify({ ...G.save, world: undefined }); return btoa(unescape(encodeURIComponent(JSON.stringify({ d, h: hashStr(d) })))); }
 export function importSave(str) {
-  try { const s = decode(decodeURIComponent(escape(atob(str.trim())))); if (!s) return false; G.save = s; saveNow(); return true; } catch { return false; }
+  try { const s = decode(decodeURIComponent(escape(atob(str.trim())))); if (!s) return false; const w = G.save && G.save.world; G.save = s; G.save.world = w; saveNow(); return true; } catch { return false; }
 }
 
 export function newChar(name, cls) {

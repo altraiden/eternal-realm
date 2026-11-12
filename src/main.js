@@ -2,7 +2,7 @@ import './style.css';
 import { G } from './state.js';
 import { bus } from './util.js';
 import { loadAtlas } from './gfx.js';
-import { loadSave, saveNow } from './save.js';
+import { loadSave, saveNow, loadWorld, saveWorld } from './save.js';
 import * as game from './game.js';
 const { initGame, useFlask } = game;
 import * as uicore from './ui/core.js';
@@ -16,6 +16,7 @@ import * as bots from './bots.js';
 async function boot() {
   await loadAtlas();
   loadSave();
+  await loadWorld();
   bots.initWorld();
   initUICore();
   initGame(document.getElementById('game'));
@@ -24,7 +25,8 @@ async function boot() {
     catch (e) { console.warn('3D renderer unavailable, using 2D', e); G.gfx = '2D'; }
   } else G.gfx = '2D';
   bus.on('flask', useFlask);
-  window.addEventListener('beforeunload', saveNow);
+  window.addEventListener('beforeunload', () => { saveNow(); saveWorld(true); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { saveNow(); saveWorld(true); } });
   showTitle();
   window.__G = G; window.__game = game; window.__ui = uicore; window.__bots = bots; // handy for debugging in the console
 }

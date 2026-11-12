@@ -52,7 +52,10 @@ function danger(a) {
 
 function chooseTarget(a) {
   const z = G.zone, p = G.p; let best = null, bd = 1e9;
-  const boss = z.bosses.find((b) => !b.dead && b.engaged);
+  if (G.party && (G.party.order === 'stop' || G.party.order === 'follow')) return null; // orders from the party chat
+  const boss = z.bosses.find((b) => !b.dead && b.engaged), focus = G.party && G.party.focus;
+  if (boss && focus === 'boss') return boss;
+  if (focus === 'adds') { let add = null, ad = 14; for (const m of z.actors) { if (m.kind !== 'mob' || m.dead || m.boss) continue; const d = dist2(a.x, a.y, m.x, m.y); if (d < ad) { ad = d; add = m; } } if (add) return add; }
   if (boss && (a.role === 'tank' || dist2(a.x, a.y, boss.x, boss.y) < 16)) {
     if (a.role !== 'tank') { let add = null, ad = 7; for (const m of z.actors) { if (m.kind !== 'mob' || m.dead || m.boss) continue; const d = dist2(a.x, a.y, m.x, m.y); if (d < ad) { ad = d; add = m; } } if (add && a.slot % 2 === 0) return add; }
     return boss;
@@ -151,6 +154,7 @@ export function updateAlly(a, dt) {
     else if (a.role === 'tank' && tg.boss) { /* hold the boss still */ }
     return;
   }
+  if (G.party && G.party.order === 'stop') return;
   // out of combat: follow the leader in a loose formation, sometimes drift off
   if (!ai.afk && b.pers.skill < 0.75 && Math.random() < 0.00012) { ai.afk = G.time + rnd(4, 8); botSay(b, 'afk', {}, 'party'); return; }
   if (ai.afk && ai.afk < G.time) ai.afk = 0;

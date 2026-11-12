@@ -1,7 +1,7 @@
 // 2.5D renderer: Three.js on WebGPU (falls back to WebGL2). The world is real 3D geometry built from the tile map;
 // characters and most props are pixel sprites standing in it as lit, shadow-casting billboards.
 import * as THREE from 'three/webgpu';
-import { pass } from 'three/tsl';
+import { pass, output, min, max, vec3, vec4, float } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { G } from './state.js';
 import { R, biomeOf, drawOverlay, dangerOverlay, vignette, zoomNow } from './render.js';
@@ -11,6 +11,7 @@ import { MATS } from './data/items.js';
 import { itemSprite } from './items.js';
 import { mulberry } from './util.js';
 
+const FXQ = [0.3, 0.6, 1];
 const PPU = 45.25, ELEV = (41 * Math.PI) / 180, BIAS = 0.5, MAXP = 3500, NLIGHT = 12;
 const T = { ready: false, map: null, live: new Map(), areas: new Map(), fxm: new Map(), geo: new Map(), lights: [], src: [], flames: [] };
 const V = new THREE.Vector3(), V2 = new THREE.Vector3(), M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), C = new THREE.Color(), S3 = new THREE.Vector3();
@@ -55,7 +56,7 @@ export async function init3D(overlay) {
   const renderer = new THREE.WebGPURenderer({ canvas: cv, antialias: true, powerPreference: 'high-performance' });
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.35;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.22;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#050407');
   const cam = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 400);
@@ -71,6 +72,9 @@ export async function init3D(overlay) {
   const tex = new THREE.Texture(ATL.img); tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; T.atlas = tex;
   const sm = (o) => new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1, metalness: 0, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.3, ...o });
   T.mSpr = sm({}); T.mWhite = sm({ emissiveIntensity: 3.2 }); T.mGhost = sm({ transparent: true, opacity: 0.5, alphaTest: 0.2 });
+  // sprites stand right next to point lights: soft-clip their lit colour so heroes never burn out to white
+  const soft = () => { const c = output.rgb, k = max(c.sub(0.72), vec3(0)); return vec4(min(c.sub(k).add(k.div(k.add(1)).mul(0.28)), vec3(float(0.93))), output.a); };
+  T.mSpr.outputNode = soft(); T.mGhost.outputNode = soft();
   T.mXray = new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, transparent: true, opacity: 0.45, color: 0x9fc4ff, depthFunc: THREE.GreaterDepth, depthWrite: false });
   T.gCircle = new THREE.CircleGeometry(1, 48); T.gRing = new THREE.RingGeometry(0.955, 1, 64); T.gPlane = new THREE.PlaneGeometry(1, 1); T.gBall = new THREE.SphereGeometry(1, 12, 8);
   T.world = new THREE.Group(); T.dyn = new THREE.Group(); scene.add(T.world, T.dyn);
@@ -81,7 +85,7 @@ export async function init3D(overlay) {
   // post-processing: bloom
   try {
     const sp = pass(scene, cam), col = sp.getTextureNode('output');
-    T.pipe = new THREE.RenderPipeline(renderer); T.pipe.outputNode = col.add(bloom(col, 0.55, 0.55, 0.82));
+    T.pipe = new THREE.RenderPipeline(renderer); T.pipe.outputNode = (G.save.settings.bloom ?? 1) ? col.add(bloom(col, 0.42, 0.5, 0.97)) : col;
   } catch (e) { console.warn('bloom unavailable', e); T.pipe = null; }
   resize(); R.onResize = resize;
   R.proj = { w2s, s2w }; R.r3 = frame; T.ready = true;
@@ -95,7 +99,7 @@ function resize() {
 function setCamera() {
   const cam = T.cam, c = G.cam, W = R.W, H = R.H, ppu = PPU * zoomNow();
   cam.left = -W / 2 / ppu; cam.right = W / 2 / ppu; cam.top = H / 2 / ppu; cam.bottom = -H / 2 / ppu;
-  const sh = c.shake > 0.2 ? c.shake / ppu : 0;
+  const sh = c.shake > 0.2 ? (c.shake / ppu) * (G.save.settings.shake ?? 1) : 0;
   V.set(c.x + (Math.random() - 0.5) * sh, 0, c.y + (Math.random() - 0.5) * sh);
   cam.position.copy(V).addScaledVector(toCam, 120); cam.lookAt(V); cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
   camUp.set(0, 1, 0).applyQuaternion(cam.quaternion); camFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -110,13 +114,14 @@ function s2w(sx, sy) {
 
 // ---------------------------------------------------------------- particles
 function emit(x, h, z, o) {
-  const P = T.P, n = o.n || 1, col = C.set(o.col || '#ffffff'), k = o.k || 1.6;
+  const q = FXQ[G.save.settings.fx ?? 2]; if (q < 1 && Math.random() > q) return;
+  const P = T.P, n = Math.max(1, Math.round((o.n || 1) * (q < 1 ? q + 0.2 : 1))), col = C.set(o.col || '#ffffff'), k = o.k || 1.6;
   for (let i = 0; i < n; i++) {
-    if (P.n >= MAXP) return; const j = P.n++, a = Math.random() * 6.283, sp = (o.spd || 0) * (0.3 + Math.random() * 0.7);
+    if (P.n >= MAXP || (P.n > MAXP * 0.6 && Math.random() < 0.5)) return; const j = P.n++, a = Math.random() * 6.283, sp = (o.spd || 0) * (0.3 + Math.random() * 0.7);
     P.x[j] = x + (Math.random() - 0.5) * (o.spread || 0); P.y[j] = h + Math.random() * (o.hs || 0); P.z[j] = z + (Math.random() - 0.5) * (o.spread || 0);
     P.vx[j] = Math.cos(a) * sp + (o.vx || 0); P.vz[j] = Math.sin(a) * sp + (o.vz || 0); P.vy[j] = (o.up || 0) * (0.4 + Math.random() * 0.8);
     P.l[j] = P.m[j] = (o.life || 0.5) * (0.6 + Math.random() * 0.7); P.s[j] = (o.size || 0.07) * (0.6 + Math.random() * 0.8); P.gr[j] = o.grav || 0;
-    P.r[j] = col.r * k; P.g[j] = col.g * k; P.b[j] = col.b * k;
+    const kk = Math.min(k, 1.25) * (P.n > MAXP * 0.5 ? 0.6 : 1); P.r[j] = col.r * kk; P.g[j] = col.g * kk; P.b[j] = col.b * kk;
   }
 }
 function updateParticles(dt) {
@@ -340,12 +345,14 @@ function frame(dt) {
   for (let i = 0; i < 3; i++) if (Math.random() < am[2]) emit(G.cam.x + (Math.random() - 0.5) * 30, am[1] < 0 ? 7 + Math.random() * 3 : Math.random() * 2.5, G.cam.y + (Math.random() - 0.5) * 30, { col: am[0], up: 0, vx: 0.3, life: 3.2, size: 0.05, k: 1.1, grav: -am[1] * 0.5 });
   updateParticles(dt);
   // ---- lights: the nearest sources get the pooled point lights
-  if (p) { T.plight.position.set(p.x, 1.7, p.y); T.plight.intensity = (p.dead ? 6 : 38) * (1 + Math.sin(t * 9) * 0.03 + Math.sin(t * 23) * 0.02); T.sun.target.position.set(Math.round(G.cam.x), 0, Math.round(G.cam.y)); T.sun.position.set(Math.round(G.cam.x) - 14, 30, Math.round(G.cam.y) + 9); }
+  if (p) { T.plight.position.set(p.x, 2.3, p.y); T.plight.intensity = (p.dead ? 5 : 24) * (1 + Math.sin(t * 9) * 0.03 + Math.sin(t * 23) * 0.02); T.sun.target.position.set(Math.round(G.cam.x), 0, Math.round(G.cam.y)); T.sun.position.set(Math.round(G.cam.x) - 14, 30, Math.round(G.cam.y) + 9); }
   for (const bo of z.bosses) if (!bo.dead) src.push({ x: bo.x, h: 1.6, y: bo.y, col: '#ff5a40', int: 14, fl: 0.15 });
   const all = src; for (const s of T.src) if (Math.abs(s.x - G.cam.x) + Math.abs(s.y - G.cam.y) < 30) all.push(s);
   for (const s of all) s.d = (s.x - G.cam.x) ** 2 + (s.y - G.cam.y) ** 2;
   all.sort((a, c) => a.d - c.d);
-  for (let i = 0; i < NLIGHT; i++) { const l = T.lights[i], s = all[i]; if (!s) { l.intensity = 0; continue; } l.position.set(s.x, s.h, s.y); l.color.set(s.col); l.intensity = s.int * (1 + (s.fl ? Math.sin(t * 11 + s.x * 3) * s.fl * 0.5 + Math.sin(t * 27 + s.y) * s.fl * 0.3 : 0)); }
+  // merge nearby sources so a cluster of projectiles/spells can't stack a dozen lights on one spot (overexposure)
+  const pick = []; for (const s of all) { const m = pick.find((q) => (q.x - s.x) ** 2 + (q.y - s.y) ** 2 < 4); if (m) { m.int = Math.min(m.cap, m.int + s.int * 0.2); continue; } if (pick.length < NLIGHT) pick.push({ ...s, cap: Math.min(26, s.int * 1.5) }); }
+  for (let i = 0; i < NLIGHT; i++) { const l = T.lights[i], s = pick[i]; if (!s) { l.intensity = 0; continue; } l.position.set(s.x, s.h, s.y); l.color.set(s.col); l.intensity = Math.min(26, s.int) * (1 + (s.fl ? Math.sin(t * 11 + s.x * 3) * s.fl * 0.5 + Math.sin(t * 27 + s.y) * s.fl * 0.3 : 0)); }
   if (T.depth) T.depth.material.map.offset.set(t * 0.004, t * 0.003);
   // ---- draw
   if (T.pipe) { try { T.pipe.render(); } catch (e) { console.warn('post pipeline failed, plain render', e); T.pipe = null; } }

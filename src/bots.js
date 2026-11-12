@@ -8,6 +8,7 @@ import { ACTIVITIES, CURVE, weekId } from './data/activities.js';
 import { CLASS_GEAR, CLASS_ROLES, CLASS_ARCH, ROLE_SPEC, ROLE_BAR, ROLE_N, W_BASE, W_ARCH, NAMES, NICK_SUFFIX, GUILDS, CHAT, classBases } from './data/social.js';
 import { genItem, itemScore, usable, sellValue, addToBag, dropAt, CRAFT } from './items.js';
 import { rnd, rint, pick, chance, shuffle, uid, bus, clamp } from './util.js';
+import { goalStep, brainTick, initGuilds } from './brain.js';
 
 const SLOTS = ['helm', 'chest', 'gloves', 'boots', 'belt', 'amulet', 'ring1', 'ring2', 'mainhand', 'offhand', 'relic', 'artifact'];
 const slotType = (s) => (s === 'ring1' || s === 'ring2' ? 'ring' : s);
@@ -61,7 +62,7 @@ function makeBot(i, taken) {
     id: uid(), name, cls, level, xp: 0, gold: rint(400, 5000), attrs, attrPts: 0, passives: allocPassives(cls, 45 + level - 70), pp: 0, spec, paragon: {},
     equip: gearFor(cls, tier, skill), skills: { bar: (ROLE_BAR[cls + ':' + role] || CLASSES[cls].bar).slice(), sup: {} }, mats: { dust: rint(5, 40), chaos: rint(0, 4), whet: rint(0, 4), ember: rint(0, 3) }, flask: { max: 3, pow: 45 },
   };
-  return { id: 'b' + i, role, tier, online: Math.random() < 0.6, guild: Math.random() < 0.6 ? pick(GUILDS) : null, lock: 0, kills: 0, ch, pers: { skill, greed: rnd(0, 1), chatty: rnd(0, 1), patience: rint(2, 5) } };
+  return { id: 'b' + i, role, tier, online: Math.random() < 0.6, guild: null, lock: 0, kills: rint(500, 9000), tower: rint(0, 12), bossK: rint(0, 15), sched: { h: rint(0, 23), len: rint(6, 15) }, mem: { rel: 0, runs: 0 }, goal: null, done: 0, ch, pers: { skill, greed: rnd(0, 1), chatty: rnd(0, 1), patience: rint(2, 5), social: rnd(0, 1), compet: rnd(0, 1), helpful: rnd(0, 1), toxic: Math.random() < 0.25 ? rnd(0.5, 1) : rnd(0, 0.4) } };
 }
 export function botPower(b) {
   let p = b.ch.level * 20;
@@ -77,12 +78,14 @@ const needPower = (tier) => W().ref * Math.pow(1.085, tier - 1);
 
 export function initWorld() {
   const s = G.save;
-  if (!s.world) {
-    const taken = new Set(), bots = []; for (let i = 0; i < 60; i++) bots.push(makeBot(i, taken));
-    s.world = { v: 1, bots, ah: { lots: [], mats: {} }, t: Date.now(), tick: 0, rep: 0, ref: 1 };
+  if (!s.world || s.world.v !== 2) {
+    const taken = new Set(), bots = []; for (let i = 0; i < 300; i++) bots.push(makeBot(i, taken));
+    s.world = { v: 2, dm: {}, myGuild: null, bots, ah: { lots: [], mats: {} }, t: Date.now(), tick: 0, rep: 0, ref: 1 };
     const t1 = bots.filter((b) => b.tier <= 2).map(botPower); s.world.ref = (t1.reduce((a, b) => a + b, 0) / Math.max(1, t1.length)) * 0.92;
     for (const id of TRADE_MATS) s.world.ah.mats[id] = { price: MAT_BASE[id], stock: rint(8, 30) };
-    for (let i = 0; i < 40; i++) simTick(true);
+    for (const b of bots) botPower(b);
+    initGuilds(s.world);
+    for (let i = 0; i < 25; i++) simTick(true);
   }
   for (const b of s.world.bots) botPower(b);
   const missed = Math.min(300, Math.floor((Date.now() - s.world.t) / 20000));
@@ -138,7 +141,7 @@ export function simTick(silent) {
   w.tick++;
   for (const b of w.bots) {
     if (inParty.has(b.id)) continue;
-    if (Math.random() < 0.02) b.online = !b.online;
+    { const hr = new Date().getHours(), want = ((hr - b.sched.h + 24) % 24) < b.sched.len; if (b.online !== want && Math.random() < 0.12) b.online = want; }
     if (!b.online) continue;
     const ch = b.ch, r = Math.random();
     if (r < 0.3) {
@@ -154,6 +157,7 @@ export function simTick(silent) {
       }
       for (const id of ['chaos', 'whet', 'ember', 'exalt', 'regal', 'dust']) if (Math.random() < (id === 'dust' ? 0.8 : 0.22)) ch.mats[id] = (ch.mats[id] || 0) + 1;
       if (botPower(b) > needPower(b.tier + 1) * 0.95 && b.tier < 60 && Math.random() < 0.5) b.tier++;
+      goalStep(b, silent);
     } else if (r < 0.45) botCraft(b);
     else if (r < 0.62) botShop(b, silent);
     else if (r < 0.66 && !silent && chance(60 * b.pers.chatty)) {
@@ -170,6 +174,7 @@ export function simTick(silent) {
   }
   w.ah.lots = lots.filter((l) => !l.gone);
   for (const id of TRADE_MATS) { const m = w.ah.mats[id]; m.price = Math.round(m.price + (MAT_BASE[id] - m.price) * 0.03 + rnd(-0.02, 0.02) * m.price); m.stock = clamp(m.stock + rint(-1, 2), 0, 60); }
+  brainTick(silent);
 }
 function sellLot(l, buyer, silent) {
   const w = W(), cut = Math.round(l.price * 0.95);
@@ -180,6 +185,7 @@ function sellLot(l, buyer, silent) {
 }
 function botShop(b, silent) {
   const w = W(), ch = b.ch; let best = null, bg = 0;
+  if (b.goal && b.goal.type === 'rich' && Math.random() < 0.7) return;
   for (const l of w.ah.lots) {
     if (l.gone || l.by === b.id || l.price > ch.gold * 0.8 || !usable(ch.cls, l.it)) continue;
     const slot = BASES[l.it.base].s === 'ring' ? 'ring1' : BASES[l.it.base].s, cur = ch.equip[slot];
@@ -232,7 +238,7 @@ export function partyReward(run, win) {
   if (!G.party) return; const wk = weekId();
   for (const id of G.party.ids) {
     const b = botById(id); if (!b) continue;
-    if (win) { botXp(b, CURVE.mobXp(run.tier) * 500); b.ch.gold += Math.round(CURVE.gold(run.tier) * 400); if (run.tier >= b.tier && b.tier < 60) b.tier++; if (run.act === 'raid') b.lock = wk; }
+    if (win) { b.mem.rel = Math.min(10, b.mem.rel + 0.6); b.mem.runs++; botXp(b, CURVE.mobXp(run.tier) * 500); b.ch.gold += Math.round(CURVE.gold(run.tier) * 400); if (run.tier >= b.tier && b.tier < 60) b.tier++; if (run.act === 'raid') b.lock = wk; }
     botPower(b);
   }
   if (win) for (const id of shuffle(G.party.ids.slice()).slice(0, 3)) botSay(botById(id), Math.random() < 0.5 ? 'win' : 'thx', {}, 'party');
@@ -273,7 +279,7 @@ export function resolveRoll(roll, choice) {
       else if (equipIfBetter(b, it)) { bus.emit('botGear', b); if (chance(40)) botSay(b, 'need', {}, 'party'); } else dispose(b, it, true);
     }
   }
-  if (choice === 'need' && !usable(G.ch.cls, it)) { w.rep -= 2; const b = G.party && botById(pick(G.party.ids)); if (b) botSay(b, 'ninja', { n: G.ch.name }, 'party'); }
+  if (choice === 'need' && !usable(G.ch.cls, it)) { w.rep -= 2; for (const id of G.party ? G.party.ids : []) { const pb = botById(id); if (pb) pb.mem.rel -= 1.5; } const b = G.party && botById(pick(G.party.ids)); if (b) botSay(b, 'ninja', { n: G.ch.name }, 'party'); }
   else if (choice !== 'need' && w.rep < 0 && Math.random() < 0.3) w.rep++;
   G.rolls = G.rolls.filter((r) => r !== roll); bus.emit('rolls');
 }
